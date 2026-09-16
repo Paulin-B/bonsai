@@ -1,8 +1,8 @@
 # Bonsai
 
 A local desktop AI assistant that watches your screen, works on your files, and gets
-more useful the longer you use it. It talks to any OpenAI-compatible endpoint —
-llama.cpp, LM Studio, Ollama — so the model stays on your machine if you want it to.
+more useful the longer you use it. It talks to any OpenAI-compatible endpoint
+llama.cpp, LM Studio, Ollama so the model stays on your machine if you want it to.
 
 It is a single PyQt6 app. No account, no telemetry, no cloud.
 
