@@ -53,6 +53,16 @@ check("the size is applied", "font-size: 17px" in ga.stylesheet("Midnight", "Sys
 check("every font option is a real stack",
       all("," in stack for stack in ga.FONT_STACKS.values()), True)
 
+print("\n-- asking before the app exists must not kill the process --")
+check("no QApplication yet, so no answer - and no crash", ga.system_font_family(), None)
+check("and the plain stack is used meanwhile", ga.font_stack("System"),
+      ga.FONT_STACKS["System"])
+# The bug this guards: none of the stack was installed, fontconfig substituted
+# Cantarell, and Qt instances that variable font so badly that regular text looks
+# semi-bold and bold comes out smeared.
+for bad in ("Cantarell", "Adwaita Sans"):
+    check(f"{bad} is never preferred", bad in ga.PREFERRED_UI_FONTS, False)
+
 print("\n-- in the window --")
 box = Path(tempfile.mkdtemp(prefix="bonsai-theme-"))
 for n in ["SETTINGS_FILE","CHARACTER_FILE","MEMORY_FILE","SCREEN_LOG_FILE","TASKS_FILE",
@@ -90,6 +100,25 @@ win.settings["dark_mode"] = False
 check("an old light setup lands on the light neutral", win.theme_now(), ga.NEUTRAL_LIGHT)
 win.settings["dark_mode"] = True
 check("an old dark setup lands on the dark neutral", win.theme_now(), ga.NEUTRAL_DARK)
+
+print("\n-- with the app up, the font is resolved from what is installed --")
+from PyQt6.QtGui import QFontDatabase
+ga.theme._installed_ui_font = "unset"
+found = ga.system_font_family()
+installed = set(QFontDatabase.families())
+check("it picks something that genuinely exists", found is None or found in installed, True)
+check("and the most preferred one available",
+      found, next((f for f in ga.PREFERRED_UI_FONTS if f in installed), None))
+stack = ga.font_stack("System")
+check("the resolved font leads the stack",
+      stack.startswith(f'"{found}"') if found else True, True)
+check("the original names stay as fallbacks for other machines", "Segoe UI" in stack, True)
+check("an explicit choice is honoured exactly as written",
+      ga.font_stack("Mono"), ga.FONT_STACKS["Mono"])
+ga.theme._installed_ui_font = None
+check("a machine with none of them falls back to the plain stack",
+      ga.font_stack("System"), ga.FONT_STACKS["System"])
+ga.theme._installed_ui_font = "unset"
 
 check("a settings file naming no known theme still paints",
       (win.settings.__setitem__("theme", "Deleted Theme"), win.theme_now())[1]

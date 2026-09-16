@@ -73,8 +73,47 @@ FONT_STACKS = {
     "Serif": '"Iowan Old Style", "Georgia", "Cambria", serif',
     "Mono": '"JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", monospace',
     "Humanist": '"Optima", "Gill Sans", "Trebuchet MS", sans-serif',
+    "Noto Sans": '"Noto Sans", sans-serif',
+    "DejaVu": '"DejaVu Sans", sans-serif',
 }
 DEFAULT_FONT = "System"
+
+# Asking CSS for a font the machine does not have does not fall through to the next
+# name - fontconfig substitutes something, and what it substitutes may render badly.
+# On the machine this was found on, every name in the System stack was missing and Qt
+# landed on Cantarell: a variable font it instances so poorly that regular text looks
+# semi-bold and bold comes out visibly smeared. So the first name in the stack is
+# chosen from what is actually installed, best first, and only then handed to CSS.
+PREFERRED_UI_FONTS = [
+    "Inter", "SF Pro Text", "Segoe UI",          # the nice ones, per platform
+    "Noto Sans", "Source Sans 3", "Open Sans",   # widely installed and crisp
+    "Liberation Sans", "DejaVu Sans",            # nearly always present on Linux
+]
+_installed_ui_font = "unset"
+
+
+def system_font_family():
+    """The best UI font actually present, or None if none of them are.
+
+    Deliberately checks the installed family list rather than trusting a CSS stack:
+    fontconfig reports a substitute for a missing name, so 'is Segoe UI available?'
+    answers yes on a machine that has never seen it."""
+    global _installed_ui_font
+    if _installed_ui_font != "unset":
+        return _installed_ui_font
+    from PyQt6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        # Querying the font database without a QApplication is a Qt fatal error, which
+        # aborts the process rather than raising something catchable. Answer "no idea"
+        # and stay uncached, so the real answer is found once the app is up.
+        return None
+    try:
+        from PyQt6.QtGui import QFontDatabase
+        installed = set(QFontDatabase.families())
+    except Exception:
+        installed = set()
+    _installed_ui_font = next((f for f in PREFERRED_UI_FONTS if f in installed), None)
+    return _installed_ui_font
 
 
 def palette(name=None):
@@ -85,7 +124,12 @@ def palette(name=None):
 
 
 def font_stack(name=None):
-    return FONT_STACKS.get(name or DEFAULT_FONT, FONT_STACKS[DEFAULT_FONT])
+    """The CSS font-family for an option, led by a font known to be installed."""
+    stack = FONT_STACKS.get(name or DEFAULT_FONT, FONT_STACKS[DEFAULT_FONT])
+    if (name or DEFAULT_FONT) != "System":
+        return stack            # an explicit choice is honoured as written
+    found = system_font_family()
+    return f'"{found}", {stack}' if found else stack
 
 
 def is_dark(name=None):
