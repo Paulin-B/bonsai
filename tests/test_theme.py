@@ -158,6 +158,49 @@ for theme in ("Midnight", "Cherry Blossom"):
     check(f"{theme}: the folder picker is a field, not the sidebar", got, field)
     check(f"  {theme}: and not the sidebar colour", got == sidebar, False)
 
+print("\n-- the dropdown popup is themed, including the row under the cursor --")
+from PyQt6.QtWidgets import QComboBox, QVBoxLayout
+from PyQt6.QtCore import QItemSelectionModel
+
+# The popup is a separate top-level window whose rows Qt paints from the system
+# palette unless ::item rules exist. On a dark theme that meant the highlighted row
+# came out a glaring white bar with light text on it - unreadable.
+for theme in ga.PALETTES:
+    app.setStyleSheet(ga.stylesheet(theme, "System", 13))
+    holder = ga.QWidget(); rows = QVBoxLayout(holder)
+    combo = QComboBox(); combo.addItems(["/media/D/Storage", "/home/sam/Vault/Bonsai"])
+    rows.addWidget(combo); holder.resize(420, 60); holder.show()
+    settle(3)
+    combo.showPopup(); settle(4)
+    view = combo.view()
+    view.selectionModel().select(view.model().index(1, 0),
+                                 QItemSelectionModel.SelectionFlag.ClearAndSelect)
+    settle(3)
+    shot = view.grab().toImage()
+    # Sample the row backgrounds a few pixels in from the edge, clear of any glyph:
+    # antialiased text produces hundreds of intermediate shades that say nothing about
+    # whether the row itself is themed.
+    colours = ga.PALETTES[theme]
+    known = {QColor(v).name() for k, v in colours.items() if k != "dark"}
+    known.add(QColor(ga.control_edge(colours)).name())
+    backgrounds = {QColor(shot.pixel(4, y)).name()
+                   for y in range(4, shot.height() - 4, 3)}
+    check(f"{theme}: every row background comes from the palette",
+          backgrounds - known, set())
+    if colours["dark"]:
+        # The reported bug: the row under the cursor painted from the system palette,
+        # a white bar with the theme's light text on it.
+        check(f"  {theme}: and none of them is light",
+              max(ga.contrast(c, "#ffffff") for c in backgrounds) > 2.0, True)
+    combo.hidePopup(); holder.close()
+
+sheet = ga.stylesheet("Sumi Ink")
+for rule in ("QComboBox QAbstractItemView::item",
+             "QComboBox QAbstractItemView::item:hover",
+             "QComboBox QAbstractItemView::item:selected"):
+    check(f"'{rule.split('::')[-1]}' is styled", rule in sheet, True)
+check("and the selected row's text colour is set too", "selection-color" in sheet, True)
+
 print("\n-- the arrows are generated per palette --")
 down = ga.arrow_icon("#8b8b93", "down")
 up = ga.arrow_icon("#8b8b93", "up")

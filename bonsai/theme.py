@@ -398,9 +398,21 @@ QCheckBox::indicator:checked {{ background: {c['accent']};
 
 QComboBox {{ background: {c['field']}; border: 1px solid {c['edge']};
              border-radius: 8px; padding: 5px 8px; color: {c['text']}; }}
+/* The popup is a separate top-level window with its own item painting. Setting only
+   the view's background leaves the row under the cursor to the system palette, which
+   on a dark theme means a glaring white bar with light text on it - invisible. The
+   ::item rules are what move the row itself onto the stylesheet. */
 QComboBox QAbstractItemView {{ background: {c['raised']}; color: {c['text']};
-                               border: 1px solid {c['border']};
-                               selection-background-color: {c['accent']}; }}
+                               border: 1px solid {c['edge']}; outline: none;
+                               selection-background-color: {c['accent']};
+                               selection-color: {c['on_accent']}; }}
+QComboBox QAbstractItemView::item {{ background: transparent; color: {c['text']};
+                                     padding: 5px 8px; min-height: 22px;
+                                     border: none; }}
+QComboBox QAbstractItemView::item:hover {{ background: {c['hover']};
+                                           color: {c['text']}; }}
+QComboBox QAbstractItemView::item:selected {{ background: {c['accent']};
+                                              color: {c['on_accent']}; }}
 QSpinBox, QDoubleSpinBox {{ background: {c['field']}; color: {c['text']};
                             border: 1px solid {c['edge']}; border-radius: 8px;
                             padding: 4px 6px; }}
