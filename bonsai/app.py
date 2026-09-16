@@ -469,6 +469,7 @@ class Bonsai(QWidget):
         trust_row = QHBoxLayout()
         trust_row.setSpacing(4)
         self.trust_picker = QComboBox()
+        self.trust_picker.setObjectName("trustPicker")
         trust_row.addWidget(self.trust_picker, stretch=1)
         remove_trust = QPushButton("−")
         remove_trust.setObjectName("ghost")

@@ -120,6 +120,47 @@ check("a machine with none of them falls back to the plain stack",
       ga.font_stack("System"), ga.FONT_STACKS["System"])
 ga.theme._installed_ui_font = "unset"
 
+print("\n-- controls are painted in the theme, not in system grey --")
+from PyQt6.QtGui import QColor
+
+def sampled(widget, x, y):
+    shot = widget.grab().toImage()
+    return QColor(shot.pixel(x, y)).name()
+
+for theme in ("Midnight", "Cherry Blossom"):
+    win.settings["theme"] = theme
+    win.apply_theme()
+    settle()
+    field = QColor(ga.PALETTES[theme]["field"]).name()
+    sidebar = QColor(ga.PALETTES[theme]["bg"]).name()
+    got = sampled(win.trust_picker, 6, win.trust_picker.height() // 2)
+    # The bug: '#sidebar QWidget { background: transparent }' outranks the plain
+    # QComboBox rule, so the folder picker showed the sidebar through it in every
+    # theme while the box above it tinted correctly.
+    check(f"{theme}: the folder picker is a field, not the sidebar", got, field)
+    check(f"  {theme}: and not the sidebar colour", got == sidebar, False)
+
+print("\n-- the arrows are generated per palette --")
+down = ga.arrow_icon("#8b8b93", "down")
+up = ga.arrow_icon("#8b8b93", "up")
+check("a down chevron is produced", down is not None and Path(down).exists(), True)
+check("and an up one", up is not None and Path(up).exists(), True)
+check("they are different files", down != up, True)
+check("a different colour is a different file",
+      ga.arrow_icon("#ff0000", "down") != down, True)
+check("asking twice reuses the file", ga.arrow_icon("#8b8b93", "down"), down)
+before = Path(down).stat().st_mtime_ns
+ga.arrow_icon("#8b8b93", "down")
+check("and does not redraw it", Path(down).stat().st_mtime_ns, before)
+
+from PyQt6.QtGui import QImage
+glyph = QImage(str(down))
+check("the chevron has pixels in it",
+      any(QColor(glyph.pixel(x, y)).alpha() > 0
+          for x in range(glyph.width()) for y in range(glyph.height())), True)
+check("the stylesheet points at it", Path(down).as_posix() in ga.stylesheet("Midnight"), True)
+check("spin buttons use them too", "QSpinBox::up-arrow" in ga.stylesheet("Midnight"), True)
+
 check("a settings file naming no known theme still paints",
       (win.settings.__setitem__("theme", "Deleted Theme"), win.theme_now())[1]
       in ga.PALETTES, True)

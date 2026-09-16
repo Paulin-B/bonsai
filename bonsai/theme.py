@@ -1,5 +1,9 @@
 """Colours, stylesheet, and how rendered documents are formatted."""
 
+from pathlib import Path
+
+from .config import DATA_DIR
+
 from PyQt6.QtGui import (
     QColor, QTextCursor, QTextFrameFormat, QTextTable,
 )
@@ -116,6 +120,40 @@ def system_font_family():
     return _installed_ui_font
 
 
+def arrow_icon(colour, pointing="down"):
+    """Path to a small chevron in `colour`, pointing up or down, or None.
+
+    Qt draws a combo box's arrow itself only while ::drop-down is left alone; touching
+    that sub-control at all removes the native arrow, and an image is then the only way
+    to put one back. So the arrow is generated per palette, which is also what lets it
+    match the text beside it instead of staying system grey in every theme."""
+    try:
+        from PyQt6.QtCore import QPointF, Qt
+        from PyQt6.QtGui import QBrush, QImage, QPainter, QPolygonF
+        target = (Path(DATA_DIR) / "arrows"
+                  / f"chevron-{pointing}-{colour.lstrip('#')}.png")
+        if target.exists():
+            return target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        size = 20
+        image = QImage(size, size, QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(colour)))
+            points = ([QPointF(5, 8), QPointF(15, 8), QPointF(10, 14)]
+                      if pointing == "down"
+                      else [QPointF(5, 13), QPointF(15, 13), QPointF(10, 7)])
+            painter.drawPolygon(QPolygonF(points))
+        finally:
+            painter.end()
+        return target if image.save(str(target)) else None
+    except Exception:
+        return None
+
+
 def palette(name=None):
     """The palette by name, falling back rather than raising on an unknown one."""
     if isinstance(name, bool):          # legacy: stylesheet(dark=True)
@@ -145,7 +183,31 @@ def stylesheet(theme=None, font=None, font_size=13):
     `theme` takes a palette name; a bool still works and means dark or light, so old
     callers and saved settings keep behaving."""
     c = palette(theme)
-    return f"""
+    # Spin buttons and the combo arrow are drawn by Qt in a system colour that no
+    # palette reaches. Styling the sub-control at all removes Qt's own glyph, so the
+    # replacement has to be supplied - which is what finally lets them match the text.
+    down = arrow_icon(c["muted"], "down")
+    up = arrow_icon(c["muted"], "up")
+    arrow_rules = (f"""
+QComboBox::drop-down {{ background: transparent; border: none; width: 22px; }}
+QComboBox::down-arrow {{ image: url("{Path(down).as_posix()}");
+                         width: 20px; height: 20px; }}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; background: transparent; border: none;
+    width: 20px; height: 13px; right: 3px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-position: top right; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-position: bottom right; }}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {c['hover']}; border-radius: 4px; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{Path(up).as_posix()}"); width: 16px; height: 16px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{Path(down).as_posix()}"); width: 16px; height: 16px; }}
+""" if down and up else "")
+    return arrow_rules + f"""
 QWidget {{
     background: {c['surface']}; color: {c['text']};
     font-family: {font_stack(font)};
@@ -155,7 +217,15 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
             border: 1px solid {c['border']}; padding: 4px 6px; }}
 
 #sidebar {{ background: {c['bg']}; border-right: 1px solid {c['border']}; }}
+/* Containers inside the sidebar must not paint `surface` over it. That blanket rule
+   also reaches the controls, though, and it outranks the plain QComboBox rule further
+   down - an id selector beats a bare type one whatever the order - so the folder
+   picker came out transparent in every theme while the box above it tinted correctly.
+   Inputs get their field colour put back here, at matching specificity. */
 #sidebar QWidget {{ background: transparent; }}
+#sidebar QComboBox, #sidebar QLineEdit, #sidebar QSpinBox {{
+    background: {c['field']}; color: {c['text']}; }}
+#sidebar QComboBox:hover {{ border-color: {c['accent']}; }}
 #appName {{ font-size: 14px; font-weight: 600; padding: 2px; }}
 #sectionLabel {{ color: {c['faint']}; font-size: 10px; font-weight: 700;
                  letter-spacing: 0.9px; padding: 2px; }}

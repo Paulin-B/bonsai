@@ -110,6 +110,12 @@ disagree with your choice.
 
 *Midnight · Paper · Bonsai Green · Cherry Blossom · Sumi Ink · Sea Glass*
 
+Settings are grouped rather than stacked in one long list, and follow the theme too —
+including the spin and dropdown arrows, which Qt otherwise draws in a system colour no
+palette reaches.
+
+![Settings](docs/settings.png)
+
 Every palette shares the same keys, so adding one is a dict in
 [`bonsai/theme.py`](bonsai/theme.py) and nothing else. There is a test that holds each
 one to a contrast floor — body text at 7:1, muted text and anything on the accent at
@@ -161,7 +167,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,359 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
+1,372 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Licence
 
