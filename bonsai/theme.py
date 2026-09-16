@@ -5,34 +5,107 @@ from PyQt6.QtGui import (
 )
 
 
-# Two palettes, same keys, so every rule below is written once. Dark is the intended
-# look; light is a straight inversion for daylight use.
-THEMES = {
-    "dark": {
+# Every palette carries the same keys, so each rule in the stylesheet is written once
+# and none of them needs to know which theme is in use. `dark` is not a colour - it
+# tells rendered documents and syntax highlighting which way round to work.
+PALETTES = {
+    "Midnight": {
+        "dark": True,
         "bg": "#161618", "surface": "#1e1e20", "raised": "#2a2a2e",
         "border": "#313136", "text": "#e8e8ea", "muted": "#8b8b93",
         "faint": "#6a6a72", "accent": "#3b6ef6", "on_accent": "#ffffff",
         "hover": "#26262a", "field": "#232327",
     },
-    "light": {
+    "Paper": {
+        "dark": False,
         "bg": "#ececee", "surface": "#ffffff", "raised": "#f3f3f6",
         "border": "#dcdce0", "text": "#1b1b1d", "muted": "#6c6c74",
         "faint": "#8b8b93", "accent": "#3b6ef6", "on_accent": "#ffffff",
         "hover": "#e4e4e8", "field": "#f7f7f9",
     },
+    "Bonsai Green": {
+        "dark": True,
+        "bg": "#0f1711", "surface": "#152018", "raised": "#1e2c23",
+        "border": "#28392e", "text": "#e3efe6", "muted": "#8aa392",
+        "faint": "#6a8273", "accent": "#5cb173", "on_accent": "#0b1410",
+        "hover": "#1b2920", "field": "#18241b",
+    },
+    "Cherry Blossom": {
+        "dark": False,
+        "bg": "#f6ebef", "surface": "#fffafc", "raised": "#fdeef3",
+        "border": "#f0d5de", "text": "#3d2b33", "muted": "#8a6b76",
+        # Deepened from #e0729a: at that lightness white text on the accent scored
+        # 2.98 against white, below the 3.0 large-text floor, and the Send button is
+        # exactly that. Still cherry, just readable.
+        "faint": "#a98d97", "accent": "#d2537f", "on_accent": "#ffffff",
+        "hover": "#fae2ea", "field": "#fff5f8",
+    },
+    "Sumi Ink": {
+        "dark": True,
+        "bg": "#12110f", "surface": "#1a1917", "raised": "#252320",
+        "border": "#33302a", "text": "#ece7df", "muted": "#9a9186",
+        "faint": "#777066", "accent": "#c9863f", "on_accent": "#1a1917",
+        "hover": "#221f1c", "field": "#1e1c19",
+    },
+    "Sea Glass": {
+        "dark": False,
+        "bg": "#e9f1f1", "surface": "#ffffff", "raised": "#e5efef",
+        "border": "#ccdbdb", "text": "#1d2b2b", "muted": "#5f7575",
+        "faint": "#859999", "accent": "#2f8f8f", "on_accent": "#ffffff",
+        "hover": "#dbe9e9", "field": "#f4f9f9",
+    },
 }
+DEFAULT_THEME = "Midnight"
+
+# The neutral pair the Dark switch flips between, so the toggle keeps working for
+# anyone who never opens Settings.
+NEUTRAL_DARK, NEUTRAL_LIGHT = "Midnight", "Paper"
+
+# Kept so anything asking for "dark" or "light" by name still works.
+THEMES = {"dark": PALETTES["Midnight"], "light": PALETTES["Paper"]}
+
+# A stack per option, so a missing font falls back to something sane on every OS
+# rather than to whatever Qt picks.
+FONT_STACKS = {
+    "System": '"Inter", "SF Pro Text", "Segoe UI", "Cantarell", sans-serif',
+    "Inter": '"Inter", "Segoe UI", sans-serif',
+    "Rounded": '"SF Pro Rounded", "Varela Round", "Quicksand", "Segoe UI", sans-serif',
+    "Serif": '"Iowan Old Style", "Georgia", "Cambria", serif',
+    "Mono": '"JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", monospace',
+    "Humanist": '"Optima", "Gill Sans", "Trebuchet MS", sans-serif',
+}
+DEFAULT_FONT = "System"
+
+
+def palette(name=None):
+    """The palette by name, falling back rather than raising on an unknown one."""
+    if isinstance(name, bool):          # legacy: stylesheet(dark=True)
+        name = NEUTRAL_DARK if name else NEUTRAL_LIGHT
+    return PALETTES.get(name or DEFAULT_THEME, PALETTES[DEFAULT_THEME])
+
+
+def font_stack(name=None):
+    return FONT_STACKS.get(name or DEFAULT_FONT, FONT_STACKS[DEFAULT_FONT])
+
+
+def is_dark(name=None):
+    return bool(palette(name).get("dark", True))
 
 
 NOTE_COLOURS = {"orange": "#d9a441", "red": "#e0655a"}
 
 
-def stylesheet(dark=True):
-    c = THEMES["dark" if dark else "light"]
+def stylesheet(theme=None, font=None, font_size=13):
+    """The whole app's stylesheet for one palette.
+
+    `theme` takes a palette name; a bool still works and means dark or light, so old
+    callers and saved settings keep behaving."""
+    c = palette(theme)
     return f"""
 QWidget {{
     background: {c['surface']}; color: {c['text']};
-    font-family: "Inter", "SF Pro Text", "Segoe UI", "Cantarell", sans-serif;
-    font-size: 13px;
+    font-family: {font_stack(font)};
+    font-size: {int(font_size)}px;
 }}
 QToolTip {{ background: {c['raised']}; color: {c['text']};
             border: 1px solid {c['border']}; padding: 4px 6px; }}
@@ -47,6 +120,10 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
                  font-size: 13px; padding: 0; }}
 #branchButton:hover {{ background: {c['raised']}; color: {c['text']};
                        border-radius: 11px; }}
+
+#modelPicker {{ background: {c['field']}; border: 1px solid {c['border']};
+                border-radius: 7px; padding: 3px 8px; color: {c['muted']}; }}
+#modelPicker:hover {{ color: {c['text']}; border-color: {c['accent']}; }}
 
 #chatList {{ background: transparent; border: none; outline: none; }}
 #chatList::item {{ color: {c['muted']}; padding: 7px 9px; border-radius: 7px; }}

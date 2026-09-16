@@ -9,7 +9,7 @@ from PyQt6.QtGui import (
     QColor, QFontMetrics, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 from .config import (
     DEFAULTS, DOCKER_SERVICES, _spell,
@@ -27,7 +27,7 @@ from .media import (
     LOOK_RASTER, fit_images, render_pdf_pages,
 )
 from .theme import (
-    THEMES, style_rendered_document,
+    FONT_STACKS, PALETTES, THEMES, palette, style_rendered_document,
 )
 
 
@@ -195,8 +195,7 @@ class PreviewPane(QWidget):
                     document.setPlainText(text)
                     self.note.setText(f"{path.name} — {len(text):,} characters")
                 fit_images(document, self._width(), 20000)
-            style_rendered_document(document, THEMES["dark" if settings().get(
-                "dark_mode", True) else "light"])
+            style_rendered_document(document, palette(settings().get("theme")))
         except Exception as exc:
             self.clear(f"Could not preview {path.name}: {exc}")
 
@@ -444,113 +443,38 @@ class InputBox(QTextEdit):
 
 
 class SettingsDialog(QDialog):
+    """Settings, grouped. One flat list of forty fields meant that finding anything
+    required reading all of it, and related options sat nowhere near each other."""
+
+    PAGES = ["Model", "Appearance", "Screen", "Memory", "Autonomy", "Services"]
+
     def __init__(self, current, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(460)
+        self.setMinimumSize(560, 560)
         self.result_settings = None
-
-        layout = QVBoxLayout()
-        note = QLabel("These are app-side settings. The model's loaded context window is set by "
-                      "-c in docker-compose.yml and needs a container restart to change.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #888888; font-size: 11px;")
-        layout.addWidget(note)
-
-        form = QFormLayout()
+        self.current = current
         self.fields = {}
 
-        def line(key, label):
-            widget = QLineEdit(str(current.get(key, DEFAULTS.get(key, ""))))
-            form.addRow(label, widget)
-            self.fields[key] = widget
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("sideTabs")
+        self.tabs.setDocumentMode(True)
+        self.forms = {}
+        for name in self.PAGES:
+            page = QWidget()
+            wrap = QVBoxLayout(page)
+            wrap.setContentsMargins(4, 10, 4, 4)
+            form = QFormLayout()
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+            wrap.addLayout(form)
+            wrap.addStretch(1)
+            self.forms[name] = form
+            self.tabs.addTab(page, name)
 
-        def spin(key, label, low, high, step=1):
-            widget = QSpinBox()
-            widget.setRange(low, high)
-            widget.setSingleStep(step)
-            widget.setValue(int(current.get(key, DEFAULTS.get(key, low))))
-            form.addRow(label, widget)
-            self.fields[key] = widget
+        self._build()
 
-        line("server_url", "Server URL:")
-        line("searxng_url", "SearXNG URL:")
-        line("compose_path", "Docker compose file:")
-        line("monitor_script", "Monitor script:")
-        spin("max_tool_steps", "Max tool steps per message:", 1, 40)
-        spin("max_history_messages", "Conversation memory (messages):", 2, 200, 2)
-        spin("max_tokens", "Max response length (tokens):", 32, 16384, 64)
-
-        self.temperature = QDoubleSpinBox()
-        self.temperature.setRange(0.0, 2.0)
-        self.temperature.setSingleStep(0.1)
-        self.temperature.setValue(float(current.get("temperature", 1.0)))
-        self.temperature.setToolTip("Voice: used for the reply you read.")
-        form.addRow("Temperature (voice):", self.temperature)
-
-        self.tool_temperature = QDoubleSpinBox()
-        self.tool_temperature.setRange(0.0, 2.0)
-        self.tool_temperature.setSingleStep(0.1)
-        self.tool_temperature.setValue(float(current.get("tool_temperature", 0.5)))
-        self.tool_temperature.setToolTip(
-            "Used while choosing and running tools. Lower is steadier; at high values "
-            "the model varies its choice of tool between identical requests.")
-        form.addRow("Temperature (tools):", self.tool_temperature)
-
-        self.top_p = QDoubleSpinBox()
-        self.top_p.setRange(0.1, 1.0)
-        self.top_p.setSingleStep(0.05)
-        self.top_p.setValue(float(current.get("top_p", 0.8)))
-        form.addRow("top_p:", self.top_p)
-
-        self.presence_penalty = QDoubleSpinBox()
-        self.presence_penalty.setRange(0.0, 2.0)
-        self.presence_penalty.setSingleStep(0.1)
-        self.presence_penalty.setValue(float(current.get("presence_penalty", 0.0)))
-        self.presence_penalty.setToolTip(
-            "Discourages reusing tokens already emitted. Keep near 0: EDIT has to "
-            "reproduce existing text character for character.")
-        form.addRow("Presence penalty:", self.presence_penalty)
-
-        spin("top_k", "top_k:", 1, 200)
-
-        spin("max_read_chars", "Max characters read from files:", 500, 200000, 500)
-        spin("max_fetch_chars", "Max characters fetched from pages:", 500, 200000, 500)
-        spin("max_learned_entries", "Character entries kept per category:", 5, 500)
-        spin("core_memory_cap", "Core memory facts before consolidating:", 3, 100)
-        line("vault_path", "Vault folder for project notes:")
-        self.capture_mode = QComboBox()
-        self.capture_mode.addItems(["active-monitor", "active-window", "all"])
-        current_mode = current.get("capture_mode", "active-monitor")
-        if current_mode in ("active-monitor", "active-window", "all"):
-            self.capture_mode.setCurrentText(current_mode)
-        self.capture_mode.setToolTip(
-            "active-monitor: the screen you are working on.\n"
-            "active-window: just the focused window - the most detail per token.\n"
-            "all: every monitor at once, which loses detail on a wide desktop.")
-        form.addRow("Screen capture area:", self.capture_mode)
-        spin("capture_max_width", "Capture max width (px):", 640, 3840, 160)
-        spin("capture_max_height", "Capture max height (px):", 480, 2160, 120)
-        spin("capture_quality", "Capture JPEG quality:", 50, 100, 5)
-        line("observer_url", "Observer server URL (blank = main):")
-        spin("proactive_interval", "Proactive check interval (seconds):", 20, 3600, 10)
-        spin("proactive_cooldown", "Quiet period after speaking (seconds):", 0, 7200, 30)
-        spin("auto_max_rounds", "Auto mode: max continuation rounds:", 1, 100)
-        spin("max_continuations", "Resume itself after running out (times):", 0, 20)
-        spin("request_timeout", "Model request timeout (seconds):", 30, 1800, 30)
-
-        self.service_boxes = {}
-        running = current.get("services", DEFAULTS["services"])
-        for index, (name, (what, required)) in enumerate(DOCKER_SERVICES.items()):
-            box = QCheckBox(f"{name} \u2014 {what}")
-            box.setChecked(True if required else bool(running.get(name, False)))
-            box.setEnabled(not required)
-            if required:
-                box.setToolTip("Required - this is the model server itself.")
-            form.addRow("Docker services:" if index == 0 else "", box)
-            self.service_boxes[name] = box
-
-        layout.addLayout(form)
+        layout = QVBoxLayout()
+        layout.addWidget(self.tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.save)
@@ -558,15 +482,147 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
         self.setLayout(layout)
 
+    # -- field helpers; each one registers how to read its value back --
+
+    def _value(self, key, fallback=None):
+        return self.current.get(key, DEFAULTS.get(key, fallback))
+
+    def _add(self, page, label, widget, key=None, tip=""):
+        if tip:
+            widget.setToolTip(tip)
+        self.forms[page].addRow(label, widget)
+        if key:
+            self.fields[key] = widget
+        return widget
+
+    def line(self, page, key, label, tip=""):
+        return self._add(page, label, QLineEdit(str(self._value(key, ""))), key, tip)
+
+    def spin(self, page, key, label, low, high, step=1, tip=""):
+        widget = QSpinBox()
+        widget.setRange(low, high)
+        widget.setSingleStep(step)
+        widget.setValue(int(self._value(key, low)))
+        return self._add(page, label, widget, key, tip)
+
+    def decimal(self, page, key, label, low, high, step=0.1, tip=""):
+        widget = QDoubleSpinBox()
+        widget.setRange(low, high)
+        widget.setSingleStep(step)
+        widget.setValue(float(self._value(key, low)))
+        return self._add(page, label, widget, key, tip)
+
+    def choice(self, page, key, label, options, tip=""):
+        widget = QComboBox()
+        widget.addItems(list(options))
+        chosen = str(self._value(key, ""))
+        if chosen in list(options):
+            widget.setCurrentText(chosen)
+        return self._add(page, label, widget, key, tip)
+
+    def hint(self, page, text):
+        label = QLabel(text)
+        label.setObjectName("notesPath")
+        label.setWordWrap(True)
+        self.forms[page].addRow(label)
+
+    # -- the pages --
+
+    def _build(self):
+        self.hint("Model", "Any OpenAI-compatible endpoint: llama.cpp, LM Studio, "
+                           "Ollama, or a remote API.")
+        self.line("Model", "server_url", "Server URL:")
+        self.line("Model", "model", "Model name:",
+                  "Sent with each request. Blank uses whatever the server has loaded - "
+                  "llama.cpp serves one model and ignores this; LM Studio and Ollama "
+                  "will load the one you name.")
+        self.spin("Model", "max_tokens", "Max response length (tokens):", 32, 32768, 64,
+                  "Roughly 100 tokens per 10 lines of code. It has to fit in the context "
+                  "window alongside the prompt, and the timeout below has to outlast it.")
+        self.spin("Model", "request_timeout", "Request timeout (seconds):", 30, 3600, 30)
+        self.spin("Model", "max_tool_steps", "Max tool steps per message:", 1, 40)
+        self.spin("Model", "max_history_messages", "Conversation memory (messages):",
+                  2, 200, 2)
+        self.decimal("Model", "temperature", "Temperature (voice):", 0.0, 2.0, 0.1,
+                     "Used for the reply you read.")
+        self.decimal("Model", "tool_temperature", "Temperature (tools):", 0.0, 2.0, 0.1,
+                     "Used while choosing and running tools. Lower is steadier; high "
+                     "values make it pick different tools for identical requests.")
+        self.decimal("Model", "top_p", "top_p:", 0.1, 1.0, 0.05)
+        self.spin("Model", "top_k", "top_k:", 1, 200)
+        self.decimal("Model", "presence_penalty", "Presence penalty:", 0.0, 2.0, 0.1,
+                     "Discourages reusing tokens already emitted. Keep near 0: EDIT has "
+                     "to reproduce existing text character for character.")
+
+        self.hint("Appearance", "Applied as soon as you save.")
+        self.choice("Appearance", "theme", "Theme:", list(PALETTES))
+        self.choice("Appearance", "font", "Font:", list(FONT_STACKS),
+                    "Each option is a stack, so a font you do not have falls back to "
+                    "something sensible for your system.")
+        self.spin("Appearance", "font_size", "Font size (px):", 10, 22, 1)
+
+        self.hint("Screen", "What Bonsai sees when you attach the screen to a message, "
+                            "and how often it looks on its own.")
+        self.choice("Screen", "capture_mode", "Capture area:",
+                    ["active-monitor", "active-window", "all"],
+                    "active-monitor: the screen you are working on.\n"
+                    "active-window: just the focused window - most detail per token.\n"
+                    "all: every monitor, which loses detail on a wide desktop.")
+        self.spin("Screen", "capture_max_width", "Max width (px):", 640, 3840, 160)
+        self.spin("Screen", "capture_max_height", "Max height (px):", 480, 2160, 120)
+        self.spin("Screen", "capture_quality", "JPEG quality:", 50, 100, 5)
+        self.line("Screen", "observer_url", "Observer server URL:",
+                  "Blank uses the main server. Point it at a second, smaller model to "
+                  "keep periodic screen checks off the main queue.")
+        self.spin("Screen", "proactive_interval", "Proactive check every (seconds):",
+                  20, 3600, 10)
+        self.spin("Screen", "proactive_cooldown", "Quiet after speaking (seconds):",
+                  0, 7200, 30)
+
+        self.hint("Memory", "Notes become markdown files if you point this at a vault; "
+                            "leave it blank and they stay in JSON.")
+        self.line("Memory", "vault_path", "Vault folder:")
+        self.spin("Memory", "core_memory_cap", "Core facts before consolidating:", 3, 100)
+        self.spin("Memory", "max_learned_entries", "Character entries per category:",
+                  5, 500)
+        self.spin("Memory", "max_read_chars", "Max characters read from files:",
+                  500, 200000, 500)
+        self.spin("Memory", "max_fetch_chars", "Max characters fetched from pages:",
+                  500, 200000, 500)
+
+        self.hint("Autonomy", "How far it may carry on without you.")
+        self.spin("Autonomy", "auto_max_rounds", "Auto mode: max rounds:", 1, 100)
+        self.spin("Autonomy", "max_continuations",
+                  "Resume itself after running out (times):", 0, 20, 1,
+                  "0 turns self-resumption off.")
+
+        self.hint("Services", "Optional. Bonsai works without Docker; these only matter "
+                              "if you use the bundled compose file.")
+        self.line("Services", "searxng_url", "SearXNG URL:")
+        self.line("Services", "compose_path", "Docker compose file:")
+        self.line("Services", "monitor_script", "Monitor script:")
+        self.service_boxes = {}
+        running = self.current.get("services", DEFAULTS["services"])
+        for index, (name, (what, required)) in enumerate(DOCKER_SERVICES.items()):
+            box = QCheckBox(f"{name} — {what}")
+            box.setChecked(True if required else bool(running.get(name, False)))
+            box.setEnabled(not required)
+            if required:
+                box.setToolTip("Required - this is the model server itself.")
+            self.forms["Services"].addRow("Start on launch:" if index == 0 else "", box)
+            self.service_boxes[name] = box
+
     def save(self):
-        result = {"temperature": round(self.temperature.value(), 2),
-                  "tool_temperature": round(self.tool_temperature.value(), 2),
-                  "top_p": round(self.top_p.value(), 2),
-                  "presence_penalty": round(self.presence_penalty.value(), 2),
-                  "capture_mode": self.capture_mode.currentText(),
-                  "services": {name: box.isChecked()
+        result = {"services": {name: box.isChecked()
                                for name, box in self.service_boxes.items()}}
         for key, widget in self.fields.items():
-            result[key] = widget.text().strip() if isinstance(widget, QLineEdit) else widget.value()
+            if isinstance(widget, QLineEdit):
+                result[key] = widget.text().strip()
+            elif isinstance(widget, QComboBox):
+                result[key] = widget.currentText()
+            elif isinstance(widget, QDoubleSpinBox):
+                result[key] = round(widget.value(), 2)
+            else:
+                result[key] = widget.value()
         self.result_settings = result
         self.accept()

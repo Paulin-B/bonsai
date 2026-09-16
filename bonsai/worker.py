@@ -195,6 +195,11 @@ class Worker(QThread):
             # re-prefilling the system prompt and the screenshot on every step.
             "cache_prompt": True,
         }
+        chosen = (self.config.get("model") or "").strip()
+        if chosen:
+            # Only sent when set. llama.cpp ignores it, LM Studio and Ollama use it to
+            # decide what to load - and sending an empty string makes Ollama 404.
+            payload["model"] = chosen
         if with_tools and self.config.get("native_tools", True):
             payload["tools"] = build_tool_schemas(self.active_tools)
             payload["tool_choice"] = "auto"

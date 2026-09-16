@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    briefing_is_stale, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
@@ -39,7 +39,8 @@ from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, SkillLearner, Worker,
 )
 from .theme import (
-    NOTE_COLOURS, THEMES, markdown_css, style_rendered_document, stylesheet,
+    DEFAULT_FONT, DEFAULT_THEME, NEUTRAL_DARK, NEUTRAL_LIGHT, NOTE_COLOURS, PALETTES,
+    THEMES, is_dark, markdown_css, palette, style_rendered_document, stylesheet,
 )
 from .widgets import (
     AttachmentBar, InputBox, PreviewPane, SettingsDialog, SkillDrawer,
@@ -375,7 +376,14 @@ class Bonsai(QWidget):
         self.build_ui()
         self.setAcceptDrops(True)
         self.sidebar.setVisible(self.settings.get("sidebar_visible", True))
-        self.apply_theme(self.settings.get("dark_mode", False))
+        self.apply_theme()
+        # Asked for after startup, so a slow or absent server never delays the window.
+        # Parented to self deliberately: a bare QTimer.singleShot outlives a window
+        # that has been closed, and then fires into a deleted C++ object.
+        self._model_timer = QTimer(self)
+        self._model_timer.setSingleShot(True)
+        self._model_timer.timeout.connect(self.refresh_models)
+        self._model_timer.start(0)
         self.refresh_trusted()
         self.open_last_chat()
         self.refresh_side_panel()
@@ -503,6 +511,21 @@ class Bonsai(QWidget):
         self.chat_title = QLabel("New Chat")
         self.chat_title.setObjectName("chatTitle")
         top_row.addWidget(self.chat_title, stretch=1)
+
+        self.model_picker = QComboBox()
+        self.model_picker.setObjectName("modelPicker")
+        self.model_picker.setMinimumWidth(190)
+        self.model_picker.setToolTip(
+            "Which model to use. The list comes from the server; choosing one takes "
+            "effect on your next message. Click Refresh after starting a server.")
+        self.model_picker.activated.connect(self.on_model_chosen)
+        top_row.addWidget(self.model_picker)
+        refresh_models = QPushButton("\u21bb")
+        refresh_models.setObjectName("ghost")
+        refresh_models.setFixedWidth(26)
+        refresh_models.setToolTip("Ask the server what it can serve")
+        refresh_models.clicked.connect(lambda: self.refresh_models(announce=True))
+        top_row.addWidget(refresh_models)
         self.briefing_toggle = QPushButton("Briefing")
         self.briefing_toggle.setObjectName("ghost")
         self.briefing_toggle.setToolTip("What's new in the things you follow")
@@ -558,10 +581,6 @@ class Bonsai(QWidget):
         self.proactive_box.stateChanged.connect(self.on_proactive_toggled)
         toggles.addWidget(self.proactive_box)
 
-        self.dark_box = QCheckBox("Dark")
-        self.dark_box.setChecked(self.settings.get("dark_mode", True))
-        self.dark_box.stateChanged.connect(self.on_dark_toggled)
-        toggles.addWidget(self.dark_box)
         toggles.addStretch(1)
         layout.addWidget(strip)
 
@@ -694,8 +713,19 @@ class Bonsai(QWidget):
         layout.addWidget(self.briefing_area, stretch=1)
         return page
 
+    def theme_now(self):
+        """The palette in force, healing a settings file that names nothing.
+
+        Light and dark are themes here like any other, so there is no separate switch
+        to disagree with the picker. A settings file written before that carries
+        `dark_mode`, and it decides which neutral palette to land on."""
+        name = self.settings.get("theme")
+        if name in PALETTES:
+            return name
+        return NEUTRAL_DARK if self.settings.get("dark_mode", True) else NEUTRAL_LIGHT
+
     def palette_now(self):
-        return THEMES["dark" if self.settings.get("dark_mode", True) else "light"]
+        return palette(self.theme_now())
 
     def briefing_card(self, item):
         card = QFrame()
@@ -1171,6 +1201,55 @@ class Bonsai(QWidget):
 
     # -- helpers --
 
+    # -- models --
+
+    def refresh_models(self, announce=False):
+        """Ask the server what it offers and show it in the picker.
+
+        Never blocks a turn on it: if the server is down the picker keeps whatever is
+        configured, so a model set by hand is not silently lost."""
+        chosen = (self.settings.get("model") or "").strip()
+        found = available_models(self.settings.get("server_url", DEFAULTS["server_url"]))
+        self.model_picker.blockSignals(True)
+        self.model_picker.clear()
+        self.model_picker.addItem("Server default", "")
+        for name in found:
+            self.model_picker.addItem(Path(name).name, name)
+        if chosen and chosen not in found:
+            # Configured but not offered - keep it visible rather than resetting it.
+            self.model_picker.addItem(f"{Path(chosen).name} (not on server)", chosen)
+        index = self.model_picker.findData(chosen)
+        self.model_picker.setCurrentIndex(max(index, 0))
+        self.model_picker.blockSignals(False)
+        if announce:
+            self.log(f"Server offers {len(found)} model(s)." if found
+                     else "The server did not answer, so the model list is unchanged.",
+                     None if found else "orange")
+        return found
+
+    def on_model_chosen(self, index):
+        name = self.model_picker.itemData(index) or ""
+        if name == (self.settings.get("model") or ""):
+            return
+        self.update_setting("model", name)
+        if self.auto_running:
+            self.stop_auto("you changed the model")
+        self.log(f"Model set to <b>{Path(name).name}</b>. It applies from your next "
+                 "message; this conversation carries on as it is."
+                 if name else "Model set to whatever the server has loaded.")
+
+    def restyle_open_views(self):
+        """Redraw the parts that hold their own copy of the palette.
+
+        The stylesheet reaches ordinary widgets on its own, but rendered documents and
+        the briefing's inline link colour are baked in at build time."""
+        colours = self.palette_now()
+        self.messages.palette_colours = colours
+        if hasattr(self, "preview_pane") and self.preview_pane.path:
+            self.preview_pane.show_path(self.preview_pane.path)
+        if hasattr(self, "briefing_column"):
+            self.render_briefing()
+
     def log(self, message, colour=None, italic=True):
         """A muted line in the transcript: tool activity, warnings, app notices."""
         self.messages.add_note(message, colour)
@@ -1179,15 +1258,15 @@ class Bonsai(QWidget):
         self.settings[key] = value
         save_settings(self.settings)
 
-    def apply_theme(self, dark):
-        self.setStyleSheet(stylesheet(dark))
-
-    def on_dark_toggled(self):
-        dark = self.dark_box.isChecked()
-        self.apply_theme(dark)
-        self.update_setting("dark_mode", dark)
-        if hasattr(self, "briefing_column"):
-            self.render_briefing()      # link colour is inline, so it must be redrawn
+    def apply_theme(self, theme=None):
+        """Repaint in `theme`, or in whatever the settings currently name."""
+        if isinstance(theme, bool):     # the toolbar switch still passes a bool
+            theme = NEUTRAL_DARK if theme else NEUTRAL_LIGHT
+        if theme:
+            self.settings["theme"] = theme
+        self.setStyleSheet(stylesheet(self.theme_now(),
+                                      self.settings.get("font", DEFAULT_FONT),
+                                      self.settings.get("font_size", 13)))
 
     # -- chats --
 
@@ -1301,6 +1380,9 @@ class Bonsai(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_settings:
             self.settings.update(dialog.result_settings)
             save_settings(self.settings)
+            self.apply_theme()
+            self.restyle_open_views()
+            self.refresh_models()
             self.log("\u2699 Settings updated.")
             now = self.settings.get("services", {})
             self.stop_services([name for name, on in was_running.items()

@@ -217,6 +217,29 @@ def search_memory(query):
             + "\n".join(f"- {fact}" for fact in recent))
 
 
+def available_models(server_url, timeout=4):
+    """Model ids an OpenAI-compatible server will accept, newest API shape first.
+
+    Every server answers /v1/models: llama.cpp lists the single model it loaded,
+    LM Studio and Ollama list everything they could load on demand."""
+    url = re.sub(r"/v1/chat/completions/?$", "/v1/models", server_url or "")
+    if not url.startswith("http"):
+        return []
+    try:
+        response = requests.get(url, timeout=timeout)
+        if response.status_code != 200:
+            return []
+        data = response.json()
+    except Exception:
+        return []
+    found = []
+    for entry in (data.get("data") or data.get("models") or []):
+        name = entry.get("id") or entry.get("name") if isinstance(entry, dict) else entry
+        if name and name not in found:
+            found.append(str(name))
+    return found
+
+
 def load_skills():
     return load_json(SKILLS_FILE, {"skills": []})
 

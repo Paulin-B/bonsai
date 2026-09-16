@@ -15,7 +15,7 @@ from PyQt6.QtGui import (
     QPageSize, QPdfWriter, QTextDocument,
 )
 from .config import (
-    ALLOWED_COMMANDS, COMMAND_TIMEOUT, FORBIDDEN_COMMANDS, MAX_DOWNLOAD_BYTES, PROTECTED_PATHS, is_read_only, sandbox_argv,
+    ALLOWED_COMMANDS, COMMAND_TIMEOUT, FORBIDDEN_COMMANDS, MACOS, MAX_DOWNLOAD_BYTES, PROTECTED_PATHS, WINDOWS, is_read_only, sandbox_argv,
 )
 from .store import (
     load_trusted, settings,
@@ -154,9 +154,17 @@ def trim_output(output, limit):
             + "\n".join(tail))
 
 
+def sandbox_available():
+    """Whether commands can actually be confined on this machine.
+
+    bubblewrap is Linux-only. Rather than pretend, the app says plainly when a command
+    ran unconfined - a sandbox everyone believes in and nobody has is worse than none."""
+    return not (WINDOWS or MACOS) and bool(shutil.which("bwrap"))
+
+
 def execute_command(argv, workdir):
     config = settings()
-    sandboxed = config.get("sandbox_commands", True) and bool(shutil.which("bwrap"))
+    sandboxed = config.get("sandbox_commands", True) and sandbox_available()
     launch = (sandbox_argv(argv, workdir, config.get("sandbox_network", False))
               if sandboxed else argv)
     try:
@@ -174,7 +182,7 @@ def execute_command(argv, workdir):
     output = (completed.stdout or "") + (completed.stderr or "")
     output = output.strip() or "(no output)"
     output = trim_output(output, config.get("max_command_chars", 15000))
-    where = f"{workdir} (sandboxed)" if sandboxed else str(workdir)
+    where = f"{workdir} (sandboxed)" if sandboxed else f"{workdir} (NOT sandboxed)"
     if sandboxed and completed.returncode != 0:
         # Say why it might have failed, since the sandbox is invisible otherwise.
         output += ("\n[Ran sandboxed: only this folder is writable, credentials are "
@@ -245,11 +253,24 @@ def desktop_programs():
 
 
 def graphical_session():
+    """Whether there is anywhere for a window to appear.
+
+    Windows and macOS always have a desktop when a user is logged in; on Linux it is
+    the display server's presence that decides."""
+    if WINDOWS or MACOS:
+        return True
     return bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
 
 
 def opener_argv(target):
     """The command that hands a file or URL to whatever normally opens it."""
+    if WINDOWS:
+        # `start` is a cmd builtin, not a program, and its first quoted argument is
+        # taken as the window title - hence the empty one before the real target.
+        return ["cmd", "/c", "start", "", target]
+    if MACOS:
+        found = shutil.which("open")
+        return [found, target] if found else None
     for program in ("xdg-open", "gio"):
         found = shutil.which(program)
         if found:
@@ -316,6 +337,14 @@ def start_program(argv):
     if not graphical_session():
         return ("[Refused: no graphical session (neither WAYLAND_DISPLAY nor DISPLAY is "
                 "set), so there is nowhere for a window to open.]")
+    detach = {}
+    if WINDOWS:
+        # start_new_session is POSIX-only; this is the equivalent, and without it the
+        # launched program dies with Bonsai.
+        detach["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    else:
+        detach["start_new_session"] = True
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
     log = runtime / f"bonsai-launch-{os.getpid()}.log"
     try:
@@ -325,7 +354,7 @@ def start_program(argv):
     try:
         process = subprocess.Popen(
             argv, cwd=str(Path.home()), stdin=subprocess.DEVNULL,
-            stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)
+            stdout=sink, stderr=subprocess.STDOUT, **detach)
     except FileNotFoundError:
         return f"[Command not found: {argv[0]}]"
     except Exception as exc:

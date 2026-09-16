@@ -2,6 +2,7 @@
 
 import re
 import os
+import sys
 from pathlib import Path
 
 
@@ -30,12 +31,23 @@ APP_VERSION = "2026-09-16-branching"
 
 
 # Where the repo lives, for the optional files that ship beside it.
+WINDOWS = sys.platform.startswith("win")
+MACOS = sys.platform == "darwin"
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # All state lives here, as plain JSON, and is safe to hand-edit or delete.
 # Override with BONSAI_DATA_DIR to keep separate profiles.
-DATA_DIR = Path(os.environ.get("BONSAI_DATA_DIR",
-                               Path.home() / ".local/share")).expanduser()
+def _default_data_dir():
+    """Where this platform expects an application to keep its state."""
+    if WINDOWS:
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "Bonsai"
+    if MACOS:
+        return Path.home() / "Library/Application Support/Bonsai"
+    return Path.home() / ".local/share"
+
+
+DATA_DIR = Path(os.environ.get("BONSAI_DATA_DIR") or _default_data_dir()).expanduser()
 
 
 SETTINGS_FILE = DATA_DIR / "bonsai_settings.json"
@@ -92,7 +104,16 @@ DEFAULTS = {
     "monitor_script": str(REPO_ROOT / "monitor_stream.fish"),
     "web_search_enabled": True,
     "vision_default": True,
-    "dark_mode": True,
+    # Theme by name - see bonsai/theme.py. Light and dark are themes like any other,
+    # not a separate switch. dark_mode is only read to migrate a settings file written
+    # before that, and is no longer written.
+    # Sent with each request. Blank means "whatever the server already has":
+    # llama.cpp serves one model and ignores it, while LM Studio and Ollama will
+    # load the one named here.
+    "model": "",
+    "theme": "Midnight",
+    "font": "System",
+    "font_size": 13,
     # 2048 was roughly 200 lines of code, so writing a file in one FILE_OP meant
     # writing it in pieces. Measured on this machine the model generates ~38 tok/s, so
     # this is ~215s of generation - which is why request_timeout moves with it. Raising
@@ -235,6 +256,13 @@ FORBIDDEN_COMMANDS = {
     "reboot", "systemctl", "chown", "chmod", "chroot", "mount", "umount", "kill",
     "killall", "pkill", "curl", "wget", "ssh", "scp", "nc", "ncat", "sh", "bash",
     "zsh", "fish", "eval", "exec", "docker", "podman", "crontab", "at",
+    # The same jobs under different names on Windows. Listed unconditionally: a name
+    # that means nothing on this OS costs nothing to refuse, and a dual-boot user
+    # editing a .bat should get the same answer either way.
+    "del", "erase", "rd", "format", "diskpart", "reg", "regedit", "powershell",
+    "pwsh", "cmd", "wmic", "bcdedit", "vssadmin", "cipher", "takeown", "icacls",
+    "net", "sc", "schtasks", "shutdown.exe", "taskkill", "rundll32", "mshta",
+    "certutil", "bitsadmin",
 }
 
 

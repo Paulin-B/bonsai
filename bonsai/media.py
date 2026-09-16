@@ -5,14 +5,20 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from io import BytesIO
+from pathlib import Path
+
 from PIL import Image
+from PyQt6.QtWidgets import QApplication
+
 from PyQt6.QtCore import (
     QBuffer, QIODevice, QPointF, QRectF, QSize, QUrl, Qt,
 )
 from PyQt6.QtGui import (
-    QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPen, QPolygonF, QTextCursor, QTextDocument,
+    QBrush, QColor, QCursor, QFont, QFontMetrics, QImage, QPainter, QPen, QPolygonF, QTextCursor, QTextDocument,
 )
 from .config import (
     PROTECTED_PATHS,
@@ -97,22 +103,72 @@ def capture_args(mode, tmp):
     return ["grim", tmp]
 
 
+def qt_capture(mode):
+    """Grab the screen through Qt, which works wherever Qt runs a window.
+
+    Used on Windows and macOS, and on X11. Wayland deliberately forbids it - a client
+    cannot read the screen without the compositor's consent - which is why grim exists
+    and is preferred when it is available."""
+    app = QApplication.instance()
+    if app is None:
+        raise RuntimeError("no Qt application, so the screen cannot be grabbed")
+    screens = app.screens()
+    if not screens:
+        raise RuntimeError("Qt reports no screens attached")
+    if mode == "all" and len(screens) > 1:
+        # One image spanning every monitor, laid out as they are arranged.
+        whole = screens[0].virtualGeometry()
+        shot = QImage(whole.size(), QImage.Format.Format_RGB32)
+        shot.fill(0)
+        painter = QPainter(shot)
+        try:
+            for screen in screens:
+                grabbed = screen.grabWindow(0).toImage()
+                spot = screen.geometry().topLeft() - whole.topLeft()
+                painter.drawImage(spot, grabbed)
+        finally:
+            painter.end()
+        return qimage_to_pil(shot)
+    screen = app.screenAt(QCursor.pos()) or app.primaryScreen()
+    if mode == "active-window":
+        window = app.activeWindow()
+        if window is not None and window.windowHandle() is not None:
+            # Only ever Bonsai's own window, so it is not useful on its own; fall
+            # through to the monitor, which is what the user is actually looking at.
+            pass
+    return qimage_to_pil(screen.grabWindow(0).toImage())
+
+
+def grim_available():
+    return bool(shutil.which("grim")) and bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
 def capture_screen(mode=None):
-    tmp = "/tmp/bonsai_frame.png"
+    """A JPEG of the screen, by whichever route this machine supports."""
     config = settings()
+    mode = mode or config.get("capture_mode", "active-monitor")
+    if grim_available():
+        tmp = str(Path(tempfile.gettempdir()) / "bonsai_frame.png")
+        try:
+            subprocess.run(capture_args(mode, tmp),
+                           check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            raise RuntimeError("'grim' not found - install it or disable screen capture.")
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"grim failed: {exc.stderr.strip()}")
+        with Image.open(tmp) as img:
+            # Downscale only as far as the token budget needs. The old fixed 1280x720
+            # box turned a 5120x1440 two-monitor grab into a 1280x360 strip, in which
+            # no text survives - the model was guessing from blurred shapes.
+            return encode_frame(img.copy())
     try:
-        subprocess.run(capture_args(mode or config.get("capture_mode", "active-monitor"),
-                                    tmp),
-                       check=True, capture_output=True, text=True)
-    except FileNotFoundError:
-        raise RuntimeError("'grim' not found - install it or disable screen capture.")
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"grim failed: {exc.stderr.strip()}")
-    with Image.open(tmp) as img:
-        # Downscale only as far as the token budget needs. The old fixed 1280x720 box
-        # turned a 5120x1440 two-monitor grab into a 1280x360 strip, in which no text
-        # survives - the model was guessing from blurred shapes.
-        return encode_frame(img.copy())
+        return encode_frame(qt_capture(mode))
+    except Exception as exc:
+        if os.environ.get("WAYLAND_DISPLAY"):
+            raise RuntimeError(
+                "Screen capture on Wayland needs 'grim', and it is not installed. "
+                f"Install it, or turn screen capture off. ({exc})")
+        raise RuntimeError(f"Screen capture failed: {exc}")
 
 
 PDF_MARGIN_MM = 16

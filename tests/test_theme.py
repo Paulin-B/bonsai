@@ -1,0 +1,99 @@
+import sys
+import tempfile
+from pathlib import Path
+from bonsai_under_test import APP, load
+ga = load()
+
+ok = fail = 0
+def check(label, got, want):
+    global ok, fail
+    if got == want: ok += 1; print(f"  pass  {label}")
+    else: fail += 1; print(f"  FAIL  {label}\n        got:  {got!r}\n        want: {want!r}")
+
+print("\n-- every palette is complete, so no rule can fall back to nothing --")
+keys = set(ga.PALETTES["Midnight"])
+for name, colours in ga.PALETTES.items():
+    check(f"{name} has the same keys", set(colours), keys)
+    check(f"  {name} says whether it is dark", isinstance(colours["dark"], bool), True)
+    bad = [k for k, v in colours.items() if k != "dark" and not str(v).startswith("#")]
+    check(f"  {name} is all colours", bad, [])
+check("both neutrals exist", {ga.NEUTRAL_DARK, ga.NEUTRAL_LIGHT} <= set(ga.PALETTES), True)
+check("the default exists", ga.DEFAULT_THEME in ga.PALETTES, True)
+check("there are dark and light ones",
+      {c["dark"] for c in ga.PALETTES.values()}, {True, False})
+
+print("\n-- text stays readable on its background --")
+def luminance(hex_colour):
+    r, g, b = (int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    channels = [(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+                for c in (r, g, b)]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+def contrast(a, b):
+    high, low = sorted((luminance(a), luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+for name, c in ga.PALETTES.items():
+    check(f"{name}: body text on surface is legible", round(contrast(c["text"], c["surface"]), 1) >= 7.0, True)
+    check(f"  {name}: muted text still readable", contrast(c["muted"], c["surface"]) >= 3.0, True)
+    check(f"  {name}: text on the accent is legible", contrast(c["on_accent"], c["accent"]) >= 3.0, True)
+
+print("\n-- the stylesheet takes a name, and still takes the old boolean --")
+sheet = ga.stylesheet("Cherry Blossom")
+check("the palette is used", ga.PALETTES["Cherry Blossom"]["accent"] in sheet, True)
+check("True still means dark", ga.PALETTES[ga.NEUTRAL_DARK]["surface"] in ga.stylesheet(True), True)
+check("False still means light", ga.PALETTES[ga.NEUTRAL_LIGHT]["surface"] in ga.stylesheet(False), True)
+check("an unknown name falls back rather than raising",
+      ga.palette("Nonsense"), ga.PALETTES[ga.DEFAULT_THEME])
+check("so does an unknown font", ga.font_stack("Nonsense"), ga.FONT_STACKS[ga.DEFAULT_FONT])
+
+print("\n-- fonts and size reach the stylesheet --")
+check("the family is applied", "SF Pro Rounded" in ga.stylesheet("Midnight", "Rounded"), True)
+check("the size is applied", "font-size: 17px" in ga.stylesheet("Midnight", "System", 17), True)
+check("every font option is a real stack",
+      all("," in stack for stack in ga.FONT_STACKS.values()), True)
+
+print("\n-- in the window --")
+box = Path(tempfile.mkdtemp(prefix="bonsai-theme-"))
+for n in ["SETTINGS_FILE","CHARACTER_FILE","MEMORY_FILE","SCREEN_LOG_FILE","TASKS_FILE",
+          "SKILLS_FILE","PATTERNS_FILE","TRUSTED_PATHS_FILE","CHAT_INDEX_FILE",
+          "PROJECTS_FILE","INTERESTS_FILE","BRIEFING_FILE","DEBUG_LOG_FILE"]:
+    setattr(ga, n, box / f"{n.lower()}.json")
+ga.CHATS_DIR = box / "chats"
+ga.save_settings({**ga.DEFAULTS, "vault_path": "", "briefing_on_open": False,
+                  "briefing_enabled": False, "theme": "Bonsai Green"})
+ga.Bonsai.start_docker = lambda self: None
+app = ga.QApplication(sys.argv)
+win = ga.Bonsai(); win.resize(900, 600); win.show()
+def settle(n=4):
+    for _ in range(n): app.processEvents()
+settle()
+
+check("the chosen theme is in force", win.theme_now(), "Bonsai Green")
+check("and painted", ga.PALETTES["Bonsai Green"]["accent"] in win.styleSheet(), True)
+check("light and dark are themes, not a separate switch",
+      hasattr(win, "dark_box"), False)
+
+win.settings["theme"] = "Cherry Blossom"
+win.apply_theme()
+settle()
+check("switching repaints", ga.PALETTES["Cherry Blossom"]["accent"] in win.styleSheet(), True)
+win.settings["theme"] = "Paper"
+win.apply_theme()
+settle()
+check("choosing a light theme is all it takes", ga.is_dark(win.theme_now()), False)
+check("and it is painted", ga.PALETTES["Paper"]["bg"] in win.styleSheet(), True)
+
+print("\n-- a settings file from before themes still opens in the right mode --")
+win.settings.pop("theme", None)
+win.settings["dark_mode"] = False
+check("an old light setup lands on the light neutral", win.theme_now(), ga.NEUTRAL_LIGHT)
+win.settings["dark_mode"] = True
+check("an old dark setup lands on the dark neutral", win.theme_now(), ga.NEUTRAL_DARK)
+
+check("a settings file naming no known theme still paints",
+      (win.settings.__setitem__("theme", "Deleted Theme"), win.theme_now())[1]
+      in ga.PALETTES, True)
+
+print(f"\n{ok} passed, {fail} failed")
+sys.exit(1 if fail else 0)
