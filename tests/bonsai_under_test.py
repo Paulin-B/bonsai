@@ -15,8 +15,7 @@ sys.path.insert(0, str(ROOT))
 # (for example, that nothing dispatches unattended by accident). APP is the whole
 # package, concatenated in import order.
 _PACKAGE = ROOT / "bonsai"
-_ORDER = ["config", "store", "text", "files", "codeintel", "shell", "media", "turns",
-          "chats", "prompt", "worker", "theme", "widgets", "app"]
+_ORDER = ["config", "theme", "store", "text", "files", "codeintel", "media", "shell", "turns", "chats", "prompt", "worker", "widgets", "app"]
 
 
 class _Source:

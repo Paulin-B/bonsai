@@ -38,20 +38,24 @@ Without it a test reads your real settings and can walk your real project folder
 
 ## Layout
 
+Modules import in one direction only, top to bottom:
+
 | module | what lives there |
 |---|---|
 | `config.py` | paths, defaults, what may run or be touched |
+| `theme.py` | colours, stylesheet, document formatting |
 | `store.py` | settings, memory, skills, notes, the vault |
 | `text.py` | parsing replies, and noticing untrue ones |
 | `files.py` | reading, finding and changing files |
 | `codeintel.py` | does it parse, and what would this change break |
-| `shell.py` | commands, launching programs, the web |
 | `media.py` | screen capture, images, charts, documents |
+| `shell.py` | commands, launching programs, the web |
 | `turns.py` | tasks, evidence, handoffs, learned procedures |
 | `chats.py` | conversations and branches |
 | `prompt.py` | the system prompt and tool selection |
 | `worker.py` | the turn loop and background workers |
-| `theme.py`, `widgets.py`, `app.py` | the interface |
+| `widgets.py` | the custom Qt widgets |
+| `app.py` | the main window and entry point |
 
-Modules import in that order. If you need something from a later module, the
-definition is probably in the wrong place.
+If you find yourself needing something from a module further down the table, the
+definition is probably in the wrong place - move it rather than reaching backwards.
