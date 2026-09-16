@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-16-branching"
+APP_VERSION = "2026-09-16-themes"
 
 
 # Where the repo lives, for the optional files that ship beside it.
