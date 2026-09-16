@@ -2,7 +2,7 @@
 
 A local desktop AI assistant that watches your screen, works on your files, and gets
 more useful the longer you use it. It talks to any OpenAI-compatible endpoint
-llama.cpp, LM Studio, Ollama so the model stays on your machine if you want it to.
+(llama.cpp, LM Studio, Ollama), so the model stays on your machine if you want it to.
 
 It is a single PyQt6 app. No account, no telemetry, no cloud.
 
@@ -15,10 +15,10 @@ It is a single PyQt6 app. No account, no telemetry, no cloud.
 - **Acts on your machine.** Reads, writes and edits files, runs commands in a
   bubblewrap sandbox, opens programs, downloads things, searches the web through your
   own SearXNG.
-- **Makes things.** Charts, PDFs, and images — drawn with Qt, so there is nothing to
+- **Makes things.** Charts, PDFs, and images, drawn with Qt. There is nothing to
   install and nothing to fail.
-- **Checks its own work.** It can *look* at what it made — a chart, a page of a PDF, a
-  game window it just launched — and see whether it came out right.
+- **Checks its own work.** It can *look* at what it made (a chart, a page of a PDF, a
+  game window it just launched) and see whether it came out right.
 - **Knows what it would break.** Every write and edit is parsed. Rename a function or
   change its parameters and it tells you which files still call the old one, before you
   find out the hard way.
@@ -27,7 +27,7 @@ It is a single PyQt6 app. No account, no telemetry, no cloud.
   and the answer it gave stay in the sidebar to compare against.
 - **Remembers.** Facts about you, notes in your Obsidian vault, earlier conversations,
   and procedures it writes for itself after doing the same job three times.
-- **Briefs you.** Gathers what's new in the things you follow before you ask — news,
+- **Briefs you.** Gathers what's new in the things you follow before you ask: news,
   videos, images or ordinary web writing, over whatever window you choose, and by
   default skipping anything a previous briefing already showed you.
 
@@ -52,7 +52,7 @@ If you contribute, that is the grain to work with. See [CONTRIBUTING.md](CONTRIB
 ## Requirements
 
 - Python 3.10+
-- An OpenAI-compatible model server. A **vision** model is recommended — screen
+- An OpenAI-compatible model server. A **vision** model is recommended, since screen
   watching is the premise.
 
 It runs on Linux, Windows and macOS. What differs between them:
@@ -68,15 +68,15 @@ which is why `grim` is needed there and nowhere else. Where no sandbox exists, B
 does not pretend: every command result says `(NOT sandboxed)` so you know what you are
 approving.
 
-> **Windows and macOS are untested.** They are implemented and unit-tested — the
-> platform branches are exercised by forcing the platform flags — but nobody has yet
+> **Windows and macOS are untested.** They are implemented and unit-tested (the
+> platform branches are exercised by forcing the platform flags), but nobody has yet
 > run Bonsai on either. Expect rough edges, especially around screen capture, and
 > please open an issue if you hit one. Linux is what it is developed and used on.
 
 ## Install
 
 ```bash
-git clone https://github.com/YOUR-NAME/bonsai.git
+git clone https://github.com/Paulin-B/bonsai.git
 cd bonsai
 pip install -e ".[all]"
 bonsai
@@ -104,7 +104,7 @@ Open **⚙ Settings → Model** and set **Server URL**. Some common ones:
 | Ollama | `http://localhost:11434/v1/chat/completions` |
 
 The **model picker in the header** lists whatever the server offers and switches
-between them without restarting anything — it takes effect on your next message, and
+between them without restarting anything. It takes effect on your next message, and
 the conversation carries on. llama.cpp serves one model and ignores the choice; LM
 Studio and Ollama will load the one you pick. Press ↻ after starting a server.
 
@@ -114,23 +114,23 @@ you. Copy it to `docker-compose.yml` and edit the model path.
 ## Themes
 
 Six palettes and six font stacks, under **⚙ Settings → Appearance**, applied as soon as
-you save. Light and dark are themes like any other — there is no separate switch to
+you save. Light and dark are themes like any other, so there is no separate switch to
 disagree with your choice.
 
 ![Themes](docs/themes.png)
 
 *Midnight · Paper · Bonsai Green · Cherry Blossom · Sumi Ink · Sea Glass*
 
-Settings are grouped rather than stacked in one long list, and follow the theme too —
-including the spin and dropdown arrows, which Qt otherwise draws in a system colour no
+Settings are grouped rather than stacked in one long list, and follow the theme too,
+including the spin and dropdown arrows. Qt otherwise draws those in a system colour no
 palette reaches.
 
 ![Settings](docs/settings.png)
 
 Every palette shares the same keys, so adding one is a dict in
 [`bonsai/theme.py`](bonsai/theme.py) and nothing else. There is a test that holds each
-one to a contrast floor — body text at 7:1, muted text and anything on the accent at
-3:1 — so a new theme cannot ship unreadable.
+one to a contrast floor (body text at 7:1, muted text and anything on the accent at
+3:1), so a new theme cannot ship unreadable.
 
 ## First things to do
 
@@ -163,7 +163,7 @@ believes something wrong about you, fix the line.
 ## Safety
 
 - `sudo`, `su`, `rm`, `dd`, `systemctl`, `curl` and friends are refused outright, as
-  arguments to other programs too — `kitty -e rm -rf ~` does not get through.
+  arguments to other programs too, so `kitty -e rm -rf ~` does not get through.
 - Commands run under bubblewrap where available: only the working folder is writable,
   credential directories are masked with tmpfs, and there is no network.
 - Paths matching credentials (`.ssh`, `.gnupg`, `.aws/credentials`, tokens, browser
@@ -179,7 +179,21 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,481 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
+1,481 checks, no model server required. They run against a temporary data
+directory, so a test run cannot touch your own settings, memory or chats.
+
+## Credits
+
+Built by [Paulin-B](https://github.com/Paulin-B), who designed it, decided what it
+should do, and found most of the bugs by using it.
+
+A large share of the code was written by **Claude** (Anthropic) through
+[Claude Code](https://claude.com/claude-code), working from that direction. The
+principle the codebase is organised around, that the app should check the model's
+claims rather than trust them, came out of watching a local model fabricate completed
+work often enough that better prompt wording was clearly never going to be the answer.
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
