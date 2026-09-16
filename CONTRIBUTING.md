@@ -27,14 +27,22 @@ Assert *meaning*, not source text. Counting occurrences of a string, or checking
 two lines sit next to each other, produces false failures the moment someone inserts a
 line - this has happened here more than once. Walk the AST or check behaviour instead.
 
-Tests must sandbox their config before anything runs:
+Tests must still sandbox their own config:
 
 ```python
 for name in ["SETTINGS_FILE", "TRUSTED_PATHS_FILE", ...]:
     setattr(ga, name, box / name.lower())
 ```
 
-Without it a test reads your real settings and can walk your real project folders.
+But that is no longer the only thing standing between a test and your data.
+`tests/bonsai_under_test.py` sets `BONSAI_DATA_DIR` to a fresh temporary directory
+before the package is imported, so every path constant is derived somewhere harmless.
+
+That belt-and-braces exists because the braces failed once. When the app was a single
+file, `setattr(ga, "SETTINGS_FILE", ...)` reached everything. As a package it did not -
+each module held its own copy of the name - and a full test run silently overwrote a
+real settings file, memory, skills and chat index with fixtures. Nothing in a test run
+should be able to touch a person's actual data, however wrong the test is.
 
 ## Layout
 

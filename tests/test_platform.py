@@ -93,5 +93,22 @@ try:
 finally:
     if saved_wayland is not None: os.environ["WAYLAND_DISPLAY"] = saved_wayland
 
+print("\n-- a test run can never reach real user data --")
+import json as _json
+real = Path.home() / ".local/share" / "bonsai_settings.json"
+check("the data directory is a scratch one",
+      str(ga.DATA_DIR).startswith(tempfile.gettempdir()), True)
+for name in ("SETTINGS_FILE", "MEMORY_FILE", "SKILLS_FILE", "CHAT_INDEX_FILE",
+             "PATTERNS_FILE", "INTERESTS_FILE", "CHARACTER_FILE", "PROJECTS_FILE"):
+    path = getattr(ga, name)
+    check(f"  {name} is inside it", str(path).startswith(str(ga.DATA_DIR)), True)
+check("CHATS_DIR too", str(ga.CHATS_DIR).startswith(str(ga.DATA_DIR)), True)
+
+# The failure this guards against: saving settings without sandboxing first.
+before = real.read_text() if real.exists() else None
+ga.save_settings({**ga.DEFAULTS, "vault_path": "/tmp/some-test-vault"})
+after = real.read_text() if real.exists() else None
+check("writing settings does not touch the real file", after, before)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
