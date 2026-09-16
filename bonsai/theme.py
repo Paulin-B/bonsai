@@ -120,6 +120,53 @@ def system_font_family():
     return _installed_ui_font
 
 
+def _channels(colour):
+    return [int(colour.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+
+
+def _blend(colour, towards, amount):
+    return "#%02x%02x%02x" % tuple(
+        round(a + (b - a) * amount)
+        for a, b in zip(_channels(colour), _channels(towards)))
+
+
+def _relative_luminance(colour):
+    parts = []
+    for value in _channels(colour):
+        channel = value / 255
+        parts.append(channel / 12.92 if channel <= 0.03928
+                     else ((channel + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]
+
+
+def contrast(one, two):
+    """WCAG contrast ratio, 1 (identical) to 21 (black on white)."""
+    high, low = sorted((_relative_luminance(one), _relative_luminance(two)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+CONTROL_EDGE_RATIO = 3.0
+
+
+def control_edge(colours):
+    """A border colour for inputs that can actually be seen.
+
+    Each palette's `border` is for dividers, where being barely there is the point. On
+    a control it has to read as an edge, and measured across the six palettes it scored
+    between 1.16 and 1.49 against the panel behind it - far under the 3:1 at which a
+    boundary becomes perceivable. That is why a text box or dropdown looked untouched
+    by the theme until the pointer was over it and the border jumped to the accent.
+
+    Stepped toward the text colour until it clears the floor against both the panel and
+    the sidebar, so a new palette gets a visible edge without anyone tuning one."""
+    for step in range(21):
+        candidate = _blend(colours["border"], colours["text"], step / 20)
+        if (contrast(candidate, colours["surface"]) >= CONTROL_EDGE_RATIO
+                and contrast(candidate, colours["bg"]) >= CONTROL_EDGE_RATIO):
+            return candidate
+    return colours["muted"]
+
+
 def arrow_icon(colour, pointing="down"):
     """Path to a small chevron in `colour`, pointing up or down, or None.
 
@@ -182,7 +229,8 @@ def stylesheet(theme=None, font=None, font_size=13):
 
     `theme` takes a palette name; a bool still works and means dark or light, so old
     callers and saved settings keep behaving."""
-    c = palette(theme)
+    c = dict(palette(theme))
+    c["edge"] = control_edge(c)
     # Spin buttons and the combo arrow are drawn by Qt in a system colour that no
     # palette reaches. Styling the sub-control at all removes Qt's own glyph, so the
     # replacement has to be supplied - which is what finally lets them match the text.
@@ -323,7 +371,7 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
 #composer QTextEdit {{ background: transparent; border: none;
                        color: {c['text']}; font-size: 13px; }}
 
-QLineEdit {{ background: {c['field']}; border: 1px solid {c['border']};
+QLineEdit {{ background: {c['field']}; border: 1px solid {c['edge']};
              border-radius: 8px; padding: 6px 9px; color: {c['text']}; }}
 QLineEdit:focus {{ border: 1px solid {c['accent']}; }}
 
@@ -348,13 +396,13 @@ QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 4px;
 QCheckBox::indicator:checked {{ background: {c['accent']};
                                 border: 1px solid {c['accent']}; }}
 
-QComboBox {{ background: {c['field']}; border: 1px solid {c['border']};
+QComboBox {{ background: {c['field']}; border: 1px solid {c['edge']};
              border-radius: 8px; padding: 5px 8px; color: {c['text']}; }}
 QComboBox QAbstractItemView {{ background: {c['raised']}; color: {c['text']};
                                border: 1px solid {c['border']};
                                selection-background-color: {c['accent']}; }}
 QSpinBox, QDoubleSpinBox {{ background: {c['field']}; color: {c['text']};
-                            border: 1px solid {c['border']}; border-radius: 8px;
+                            border: 1px solid {c['edge']}; border-radius: 8px;
                             padding: 4px 6px; }}
 
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}

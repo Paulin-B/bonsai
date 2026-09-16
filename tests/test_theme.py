@@ -38,6 +38,24 @@ for name, c in ga.PALETTES.items():
     check(f"  {name}: muted text still readable", contrast(c["muted"], c["surface"]) >= 3.0, True)
     check(f"  {name}: text on the accent is legible", contrast(c["on_accent"], c["accent"]) >= 3.0, True)
 
+print("\n-- a control's edge is visible without hovering it --")
+# Measured before this existed: a field's own fill scores 1.03-1.15 against the panel
+# behind it and the palette's divider colour 1.16-1.49, so every input looked untouched
+# by the theme until the pointer was over it and the border jumped to the accent.
+for name, colours in ga.PALETTES.items():
+    edge = ga.control_edge(colours)
+    check(f"{name}: edge reads against the panel",
+          ga.contrast(edge, colours["surface"]) >= ga.CONTROL_EDGE_RATIO, True)
+    check(f"  {name}: and against the sidebar",
+          ga.contrast(edge, colours["bg"]) >= ga.CONTROL_EDGE_RATIO, True)
+    check(f"  {name}: it is derived, not the divider colour", edge == colours["border"], False)
+    check(f"  {name}: and still quieter than the body text",
+          ga.contrast(edge, colours["surface"]) < ga.contrast(colours["text"], colours["surface"]),
+          True)
+sheet = ga.stylesheet("Sumi Ink")
+check("inputs use it", f"1px solid {ga.control_edge(ga.PALETTES['Sumi Ink'])}" in sheet, True)
+check("dividers keep the quiet one", ga.PALETTES["Sumi Ink"]["border"] in sheet, True)
+
 print("\n-- the stylesheet takes a name, and still takes the old boolean --")
 sheet = ga.stylesheet("Cherry Blossom")
 check("the palette is used", ga.PALETTES["Cherry Blossom"]["accent"] in sheet, True)
