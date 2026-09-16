@@ -97,20 +97,25 @@ def settle(n=4):
     for _ in range(n): app.processEvents()
 settle()
 
+def painted():
+    """The stylesheet actually in force - it lives on the application now, so that
+    dropdowns and other top-level popups get it too."""
+    return app.styleSheet() or win.styleSheet()
+
 check("the chosen theme is in force", win.theme_now(), "Bonsai Green")
-check("and painted", ga.PALETTES["Bonsai Green"]["accent"] in win.styleSheet(), True)
+check("and painted", ga.PALETTES["Bonsai Green"]["accent"] in painted(), True)
 check("light and dark are themes, not a separate switch",
       hasattr(win, "dark_box"), False)
 
 win.settings["theme"] = "Cherry Blossom"
 win.apply_theme()
 settle()
-check("switching repaints", ga.PALETTES["Cherry Blossom"]["accent"] in win.styleSheet(), True)
+check("switching repaints", ga.PALETTES["Cherry Blossom"]["accent"] in painted(), True)
 win.settings["theme"] = "Paper"
 win.apply_theme()
 settle()
 check("choosing a light theme is all it takes", ga.is_dark(win.theme_now()), False)
-check("and it is painted", ga.PALETTES["Paper"]["bg"] in win.styleSheet(), True)
+check("and it is painted", ga.PALETTES["Paper"]["bg"] in painted(), True)
 
 print("\n-- a settings file from before themes still opens in the right mode --")
 win.settings.pop("theme", None)
@@ -158,13 +163,38 @@ for theme in ("Midnight", "Cherry Blossom"):
     check(f"{theme}: the folder picker is a field, not the sidebar", got, field)
     check(f"  {theme}: and not the sidebar colour", got == sidebar, False)
 
-print("\n-- the dropdown popup is themed, including the row under the cursor --")
+print("\n-- a window-scoped stylesheet does not reach a dropdown --")
+# The bug, reproduced: a combo's popup is its own top-level window. Setting the sheet
+# on the main window leaves the popup's rows to the system palette - white, with the
+# theme's light text on them - while the one row under the cursor picked up ::item:hover
+# and looked right. That is why it read as "only themed when highlighted over".
 from PyQt6.QtWidgets import QComboBox, QVBoxLayout
 from PyQt6.QtCore import QItemSelectionModel
 
-# The popup is a separate top-level window whose rows Qt paints from the system
-# palette unless ::item rules exist. On a dark theme that meant the highlighted row
-# came out a glaring white bar with light text on it - unreadable.
+def popup_backgrounds(scope):
+    app.setStyleSheet("")
+    holder = ga.QWidget(); rows = QVBoxLayout(holder)
+    combo = QComboBox(); combo.addItems(["/media/D/Storage", "/home/sam/Vault"])
+    rows.addWidget(combo)
+    sheet = ga.stylesheet("Sumi Ink", "System", 13)
+    (app if scope == "app" else holder).setStyleSheet(sheet)
+    holder.resize(420, 60); holder.show(); settle(3)
+    combo.showPopup(); settle(5)
+    shot = combo.view().window().grab().toImage()
+    found = {QColor(shot.pixel(4, y)).name()
+             for y in range(3, shot.height() - 3, 4)}
+    combo.hidePopup(); holder.close()
+    return found
+
+check("window-scoped leaves system white in the popup",
+      "#ffffff" in popup_backgrounds("window"), True)
+check("application-scoped does not", "#ffffff" in popup_backgrounds("app"), False)
+
+src = APP.read_text()
+check("so the app themes the application, not the window",
+      "app.setStyleSheet(sheet)" in src, True)
+
+print("\n-- and the popup rows are themed in every palette --")
 for theme in ga.PALETTES:
     app.setStyleSheet(ga.stylesheet(theme, "System", 13))
     holder = ga.QWidget(); rows = QVBoxLayout(holder)

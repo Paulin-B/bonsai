@@ -1265,9 +1265,21 @@ class Bonsai(QWidget):
             theme = NEUTRAL_DARK if theme else NEUTRAL_LIGHT
         if theme:
             self.settings["theme"] = theme
-        self.setStyleSheet(stylesheet(self.theme_now(),
-                                      self.settings.get("font", DEFAULT_FONT),
-                                      self.settings.get("font_size", 13)))
+        sheet = stylesheet(self.theme_now(),
+                           self.settings.get("font", DEFAULT_FONT),
+                           self.settings.get("font_size", 13))
+        # Applied to the application, not to this window. A combo box's dropdown is a
+        # separate top-level window, and a window-scoped stylesheet does not reach it:
+        # its rows fell back to the system palette and came out white, with the theme's
+        # light text on them. Everything else looked correct, which is what made it
+        # look like only the hovered row was themed - that was the one row whose
+        # ::item:hover rule did apply.
+        app = QApplication.instance()
+        if app is not None:
+            self.setStyleSheet("")
+            app.setStyleSheet(sheet)
+        else:
+            self.setStyleSheet(sheet)
 
     # -- chats --
 
