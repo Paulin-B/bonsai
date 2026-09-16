@@ -65,6 +65,11 @@ which is why `grim` is needed there and nowhere else. Where no sandbox exists, B
 does not pretend: every command result says `(NOT sandboxed)` so you know what you are
 approving.
 
+> **Windows and macOS are untested.** They are implemented and unit-tested — the
+> platform branches are exercised by forcing the platform flags — but nobody has yet
+> run Bonsai on either. Expect rough edges, especially around screen capture, and
+> please open an issue if you hit one. Linux is what it is developed and used on.
+
 ## Install
 
 ```bash
