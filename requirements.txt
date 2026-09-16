@@ -1,0 +1,11 @@
+# Required
+PyQt6>=6.6
+requests>=2.31
+beautifulsoup4>=4.12
+Pillow>=10.0
+
+# Optional, each enabling one feature. Bonsai runs without all of them.
+pyspellchecker>=0.8      # red underlines in the input box
+PyYAML>=6.0              # syntax checking for .yaml files
+tree-sitter>=0.23        # syntax checking and reference tracking for ~40 languages
+tree-sitter-language-pack>=1.0

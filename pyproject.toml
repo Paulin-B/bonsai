@@ -1,0 +1,35 @@
+[project]
+name = "bonsai-assistant"
+version = "0.1.0"
+description = "A local desktop AI assistant that watches your screen, works on your files, and learns as it goes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "PyQt6>=6.6",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# Each of these turns on one feature; none of them is required.
+spell = ["pyspellchecker>=0.8"]
+yaml = ["PyYAML>=6.0"]
+code = ["tree-sitter>=0.23", "tree-sitter-language-pack>=1.0"]
+all = [
+    "pyspellchecker>=0.8",
+    "PyYAML>=6.0",
+    "tree-sitter>=0.23",
+    "tree-sitter-language-pack>=1.0",
+]
+
+[project.scripts]
+bonsai = "bonsai.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["bonsai"]
