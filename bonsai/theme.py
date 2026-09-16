@@ -278,10 +278,13 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
 #sectionLabel {{ color: {c['faint']}; font-size: 10px; font-weight: 700;
                  letter-spacing: 0.9px; padding: 2px; }}
 
-#branchButton {{ background: transparent; color: {c['faint']}; border: none;
-                 font-size: 13px; padding: 0; }}
-#branchButton:hover {{ background: {c['raised']}; color: {c['text']};
-                       border-radius: 11px; }}
+#messageEditor {{ background: {c['field']}; color: {c['text']};
+                  border: 1px solid {c['edge']}; border-radius: 8px; padding: 6px; }}
+
+#branchButton, #editButton {{ background: transparent; color: {c['faint']};
+                             border: none; font-size: 13px; padding: 0; }}
+#branchButton:hover, #editButton:hover {{ background: {c['raised']};
+                                          color: {c['text']}; border-radius: 11px; }}
 
 #modelPicker {{ background: {c['field']}; border: 1px solid {c['border']};
                 border-radius: 7px; padding: 3px 8px; color: {c['muted']}; }}

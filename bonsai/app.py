@@ -12,7 +12,7 @@ from PyQt6.QtCore import (
     QProcess, QTimer, QUrl, Qt, pyqtSignal,
 )
 from PyQt6.QtGui import (
-    QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut, QTextDocument,
+    QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
@@ -230,12 +230,121 @@ class MarkdownView(QTextBrowser):
         self.fit_to_content()
 
 
+class UserMessage(QWidget):
+    """One thing you said, with the option to say it differently.
+
+    Editing forks rather than overwrites. The reply the original wording got is
+    usually the thing being compared against, and a conversation that quietly rewrites
+    its own history cannot be checked against what actually happened - which is the
+    one thing this app is careful about everywhere else."""
+
+    edited = pyqtSignal(int, str)
+    branch = pyqtSignal(int, str)
+
+    def __init__(self, text, index=None, retry=False, parent=None):
+        super().__init__(parent)
+        self.said = text
+        self.index = index
+        self.editor = None
+        self.actions = None
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.addSpacing(52)              # inset, so it reads as the other speaker
+        self.bubble = QFrame()
+        self.bubble.setObjectName("userBubble")
+        self.inner = QVBoxLayout(self.bubble)
+        self.inner.setContentsMargins(15, 11, 15, 11)
+        self.inner.setSpacing(3)
+        if retry:
+            tag = QLabel("RETRY")
+            tag.setObjectName("speaker")
+            self.inner.addWidget(tag)
+        self.body = _body_label(text)
+        self.inner.addWidget(self.body)
+        row.addWidget(self.bubble, stretch=1)
+
+        self.tools = []
+        for name, glyph, tip, slot in (
+            ("editButton", "\u270e",
+             "Change what you said and ask again from here. The conversation as it "
+             "stands is kept in the sidebar.", self.begin_edit),
+            ("branchButton", "\u2387",
+             "Branch the conversation here - everything after this message is left "
+             "behind in a copy you can go back to", self._branch),
+        ):
+            button = QPushButton(glyph)
+            button.setObjectName(name)
+            button.setFixedSize(22, 22)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(tip)
+            button.clicked.connect(slot)
+            button.setVisible(index is not None)
+            row.addWidget(button, alignment=Qt.AlignmentFlag.AlignTop)
+            self.tools.append(button)
+
+    def _branch(self):
+        self.branch.emit(self.index, self.said)
+
+    def begin_edit(self):
+        """Turn the bubble into a box you can type in."""
+        if self.editor is not None or self.index is None:
+            return
+        self.body.hide()
+        for button in self.tools:
+            button.hide()
+        self.editor = QTextEdit()
+        self.editor.setObjectName("messageEditor")
+        self.editor.setAcceptRichText(False)
+        # What is stored carries <br> where the newlines were, because the transcript
+        # renders as rich text. Put them back so it is edited as it was typed.
+        self.editor.setPlainText(self.said.replace("<br>", "\n"))
+        self.editor.setFixedHeight(96)
+        self.inner.addWidget(self.editor)
+
+        self.actions = QWidget()
+        buttons = QHBoxLayout(self.actions)
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.end_edit)
+        buttons.addWidget(cancel)
+        send = QPushButton("Ask again")
+        send.setObjectName("primary")
+        send.clicked.connect(self._commit)
+        buttons.addWidget(send)
+        self.inner.addWidget(self.actions)
+        self.editor.setFocus()
+        self.editor.moveCursor(QTextCursor.MoveOperation.End)
+
+    def end_edit(self):
+        if self.editor is None:
+            return
+        for widget in (self.editor, self.actions):
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self.editor = self.actions = None
+        self.body.show()
+        for button in self.tools:
+            button.show()
+
+    def _commit(self):
+        reworded = self.editor.toPlainText().strip() if self.editor else ""
+        index = self.index
+        self.end_edit()
+        if reworded and reworded != self.said.replace("<br>", "\n").strip():
+            self.edited.emit(index, reworded)
+
+
 class MessageList(QScrollArea):
     """The transcript, as a column of per-message widgets rather than one rich-text
     document. Qt's rich text has no border-radius, so rounded bubbles have to be real
     widgets - and this also keeps each message individually styleable."""
 
     branch_here = pyqtSignal(int, str)   # message index, what was said there
+    edit_here = pyqtSignal(int, str)     # message index, the reworded message
 
     def __init__(self, palette=None):
         super().__init__()
@@ -273,31 +382,9 @@ class MessageList(QScrollArea):
                 widget.deleteLater()
 
     def add_user(self, text, retry=False, index=None):
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.addSpacing(52)           # inset, so it reads as the other speaker
-        bubble = QFrame()
-        bubble.setObjectName("userBubble")
-        inner = QVBoxLayout(bubble)
-        inner.setContentsMargins(15, 11, 15, 11)
-        inner.setSpacing(3)
-        if retry:
-            tag = QLabel("RETRY")
-            tag.setObjectName("speaker")
-            inner.addWidget(tag)
-        inner.addWidget(_body_label(text))
-        layout.addWidget(bubble, stretch=1)
-        if index is not None:
-            branch = QPushButton("\u2387")
-            branch.setObjectName("branchButton")
-            branch.setFixedSize(22, 22)
-            branch.setCursor(Qt.CursorShape.PointingHandCursor)
-            branch.setToolTip("Branch the conversation here - everything after this "
-                              "message is left behind in a copy you can go back to")
-            branch.clicked.connect(
-                lambda _checked=False, at=index, said=text: self.branch_here.emit(at, said))
-            layout.addWidget(branch, alignment=Qt.AlignmentFlag.AlignTop)
+        row = UserMessage(text, index=index, retry=retry)
+        row.branch.connect(self.branch_here)
+        row.edited.connect(self.edit_here)
         self._append(row)
 
     def add_assistant(self, text, name="Bonsai", unprompted=False):
@@ -546,6 +633,7 @@ class Bonsai(QWidget):
         chat_layout.setSpacing(0)
         self.messages = MessageList(self.palette_now())
         self.messages.branch_here.connect(self.on_branch)
+        self.messages.edit_here.connect(self.on_edit_message)
         chat_layout.addWidget(self.messages, stretch=1)
         self.pages.addWidget(chat_page)
         self.pages.addWidget(self.build_briefing())
@@ -1441,6 +1529,29 @@ class Bonsai(QWidget):
         self.log(f"\U0001F4CE Attached: {', '.join(names)}{note} "
                  f"(queued: {len(self.attachments)}/5) - click \u00d7 on a file to remove it")
         event.acceptProposedAction()
+
+    def on_edit_message(self, index, reworded):
+        """Ask again with different wording, from the point that message was sent.
+
+        A fork, not a rewrite: the conversation as it stands - and the answer the
+        original wording got - stays in the sidebar to compare against."""
+        if not reworded.strip():
+            return
+        if self.worker and self.worker.isRunning():
+            self.log("Finish or stop the current turn before editing a message.",
+                     "orange")
+            return
+        if self.auto_running:
+            self.stop_auto("you edited a message")
+        forked = fork_chat(self.chat_id, index)
+        self.switch_chat(forked)
+        self.continuations = 0
+        self.last_handoff = self.last_next = ""
+        self.pending_handoff = None
+        self.origin_prompt = reworded
+        self.log("\u270e Asked again with different wording. The version you had, and "
+                 "the reply it got, are still in the sidebar.")
+        self.dispatch(reworded, self.vision_box.isChecked(), retry=False)
 
     def on_branch(self, index, said):
         """Fork the conversation just before this message and reopen it there.

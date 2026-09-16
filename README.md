@@ -22,6 +22,9 @@ It is a single PyQt6 app. No account, no telemetry, no cloud.
 - **Knows what it would break.** Every write and edit is parsed. Rename a function or
   change its parameters and it tells you which files still call the old one, before you
   find out the hard way.
+- **Lets you take it back.** Edit anything you sent and ask again, or branch the
+  conversation at any point. Both fork rather than overwrite, so the wording you used
+  and the answer it gave stay in the sidebar to compare against.
 - **Remembers.** Facts about you, notes in your Obsidian vault, earlier conversations,
   and procedures it writes for itself after doing the same job three times.
 - **Briefs you.** Gathers what's new in the things you follow before you ask — news,
@@ -176,7 +179,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,449 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
+1,481 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Licence
 
