@@ -24,6 +24,9 @@ It is a single PyQt6 app. No account, no telemetry, no cloud.
   find out the hard way.
 - **Remembers.** Facts about you, notes in your Obsidian vault, earlier conversations,
   and procedures it writes for itself after doing the same job three times.
+- **Briefs you.** Gathers what's new in the things you follow before you ask — news,
+  videos, images or ordinary web writing, over whatever window you choose, and by
+  default skipping anything a previous briefing already showed you.
 
 ## Why it is built the way it is
 
@@ -139,6 +142,7 @@ bonsai_character.json      who Bonsai is - edit core_traits to change its person
 bonsai_memory.json         what it believes about you
 bonsai_skills.json         saved procedures, including ones it wrote itself
 bonsai_patterns.json       shapes of work it has noticed repeating
+bonsai_briefing_seen.json  stories a briefing has already shown you
 bonsai_projects.json       per-project file ledger and notes
 bonsai_chats/              one file per conversation
 ```
@@ -167,7 +171,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,414 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
+1,449 checks, no model server required. They run against a temporary data directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Licence
 

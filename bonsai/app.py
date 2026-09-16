@@ -802,7 +802,12 @@ class Bonsai(QWidget):
                 "Nothing gathered yet. Put a few things you follow in the box above and "
                 "press Refresh." if not interests else
                 "No results for those topics. Try broader wording, or a longer window "
-                "via Briefing time range in \u2699 Settings.")
+                "via \u2699 Settings \u2192 Briefing."
+                if not briefing.get("repeats_skipped") else
+                f"Nothing new - all {briefing['repeats_skipped']} result(s) were "
+                "things a previous briefing already showed you. Widen the window, add "
+                "an interest, or turn off 'Skip anything a previous briefing showed' "
+                "in \u2699 Settings \u2192 Briefing.")
             hint.setObjectName("briefSummary")
             self.briefing_column.insertWidget(0, hint)
         for index, topic in enumerate(topics):
@@ -814,8 +819,12 @@ class Bonsai(QWidget):
                                                   self.briefing_card(item))
         fetched = briefing.get("fetched") or ""
         count = sum(len(t["items"]) for t in topics)
+        # Say when things were held back, so a short briefing reads as "nothing new"
+        # rather than as the gathering having failed.
+        skipped = briefing.get("repeats_skipped") or 0
+        held = f", {skipped} already seen" if skipped else ""
         self.briefing_status.setText(
-            f"{count} item(s), gathered {fetched.replace('T', ' ')}" if fetched
+            f"{count} item(s){held}, gathered {fetched.replace('T', ' ')}" if fetched
             else "not gathered yet")
 
     def save_interests_from_input(self):

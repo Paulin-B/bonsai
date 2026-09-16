@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-16-appsheet"
+APP_VERSION = "2026-09-16-briefing"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -81,6 +81,7 @@ INTERESTS_FILE = DATA_DIR / "bonsai_interests.json"
 
 
 BRIEFING_FILE = DATA_DIR / "bonsai_briefing.json"
+BRIEFING_SEEN_FILE = DATA_DIR / "bonsai_briefing_seen.json"
 
 
 CHAT_INDEX_FILE = DATA_DIR / "bonsai_chats_index.json"
@@ -169,7 +170,12 @@ DEFAULTS = {
     "briefing_on_open": True,       # show it instead of an empty chat at launch
     "briefing_max_age_hours": 6,    # refetch only when the cache is older than this
     "briefing_per_topic": 4,        # results kept per interest, per kind
-    "briefing_time_range": "month", # day | week | month - how far back to look
+    "briefing_time_range": "month", # how far back to look; see BRIEFING_RANGES
+    # Which kinds of result to gather. SearXNG categories, so anything it serves works.
+    "briefing_kinds": ["news", "videos"],
+    # Skip anything a previous briefing already showed you, so a refresh is new
+    # material rather than the same headlines with a later timestamp.
+    "briefing_no_repeats": True,
     "briefing_english_only": True,  # SearXNG's language= is ignored by the engines
     # Ceiling on the tool results carried forward inside one turn. They used to
     # accumulate without limit: 30 steps x max_read_chars is far past any context

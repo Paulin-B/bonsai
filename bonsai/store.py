@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import requests
 from .config import (
-    BRIEFING_FILE, CHARACTER_FILE, CHARACTER_SEED, DEFAULTS, INTERESTS_FILE, MEMORY_FILE, PROJECTS_FILE, SCREEN_LOG_FILE, SETTINGS_FILE, SKILLS_FILE, TRUSTED_PATHS_FILE,
+    BRIEFING_FILE, BRIEFING_SEEN_FILE, CHARACTER_FILE, CHARACTER_SEED, DEFAULTS, INTERESTS_FILE, MEMORY_FILE, PROJECTS_FILE, SCREEN_LOG_FILE, SETTINGS_FILE, SKILLS_FILE, TRUSTED_PATHS_FILE,
 )
 
 
@@ -382,6 +382,51 @@ def expand_skill_shortcut(prompt, skills=None):
 
 
 BRIEFING_KINDS = ("news", "videos")
+# Everything SearXNG will group for us. "general" is ordinary web results - blog posts
+# and documentation, which is where most of the useful writing about a niche topic is.
+BRIEFING_ALL_KINDS = ("news", "videos", "images", "general")
+BRIEFING_RANGES = ("day", "week", "month", "year", "")   # "" means no limit
+# What the setting shows against what SearXNG is sent.
+BRIEFING_RANGE_LABELS = {"Past day": "day", "Past week": "week", "Past month": "month",
+                         "Past year": "year", "Any time": ""}
+
+
+def briefing_kinds():
+    """The kinds to gather, ignoring anything the setting names that does not exist."""
+    wanted = settings().get("briefing_kinds") or list(BRIEFING_KINDS)
+    kept = [kind for kind in wanted if kind in BRIEFING_ALL_KINDS]
+    return kept or list(BRIEFING_KINDS)
+
+
+# Stories stay "already seen" for this long. Old enough and a piece is worth surfacing
+# again - and without an expiry the list would grow forever and slowly starve the
+# briefing of anything to show.
+BRIEFING_SEEN_DAYS = 45
+BRIEFING_SEEN_CAP = 2000
+
+
+def load_briefing_seen():
+    """{url: iso date} of what past briefings have already put in front of you."""
+    return load_json(BRIEFING_SEEN_FILE, {"urls": {}}).get("urls", {})
+
+
+def remember_briefing_urls(urls):
+    """Record what was shown, dropping entries old enough to be worth seeing again."""
+    seen = load_briefing_seen()
+    today = datetime.now()
+    cutoff = (today - timedelta(days=BRIEFING_SEEN_DAYS)).date().isoformat()
+    fresh = {url: when for url, when in seen.items() if when >= cutoff}
+    for url in urls:
+        fresh[url] = today.date().isoformat()
+    if len(fresh) > BRIEFING_SEEN_CAP:
+        keep = sorted(fresh.items(), key=lambda pair: pair[1], reverse=True)
+        fresh = dict(keep[:BRIEFING_SEEN_CAP])
+    save_json(BRIEFING_SEEN_FILE, {"urls": fresh})
+    return fresh
+
+
+def forget_briefing_seen():
+    save_json(BRIEFING_SEEN_FILE, {"urls": {}})
 
 
 # Words that are ordinary in another Latin-script language and rare in English. Two or
@@ -572,12 +617,16 @@ def fetch_briefing(interests=None, progress=None, should_stop=None):
     interests = interests if interests is not None else load_interests()
     per_topic = config.get("briefing_per_topic", 4)
     time_range = config.get("briefing_time_range", "month")
-    seen, topics = set(), []
+    kinds = briefing_kinds()
+    # What earlier briefings already showed. Held for the whole run so a story cannot
+    # slip back in under a second interest.
+    already = load_briefing_seen() if config.get("briefing_no_repeats", True) else {}
+    seen, topics, repeats = set(), [], 0
     for topic in interests:
         if should_stop and should_stop():
             break
         gathered = []
-        for kind in BRIEFING_KINDS:
+        for kind in kinds:
             if should_stop and should_stop():
                 break
             if progress:
@@ -586,10 +635,18 @@ def fetch_briefing(interests=None, progress=None, should_stop=None):
                 if item["url"] in seen:
                     continue        # the same story surfaces under several interests
                 seen.add(item["url"])
+                if item["url"] in already:
+                    repeats += 1
+                    continue
                 gathered.append(item)
             time.sleep(BRIEFING_PAUSE)
         topics.append({"topic": topic, "items": gathered})
-    briefing = {"fetched": datetime.now().isoformat(timespec="minutes"), "topics": topics}
+    shown = [item["url"] for entry in topics for item in entry["items"]]
+    if config.get("briefing_no_repeats", True):
+        remember_briefing_urls(shown)
+    briefing = {"fetched": datetime.now().isoformat(timespec="minutes"),
+                "topics": topics, "repeats_skipped": repeats,
+                "kinds": kinds, "time_range": time_range}
     save_json(BRIEFING_FILE, briefing)
     return briefing
 

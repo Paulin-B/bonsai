@@ -15,7 +15,7 @@ from .config import (
     DEFAULTS, DOCKER_SERVICES, _spell,
 )
 from .store import (
-    all_skills, match_skills, settings, skill_query,
+    BRIEFING_ALL_KINDS, BRIEFING_RANGE_LABELS, BRIEFING_SEEN_DAYS, all_skills, forget_briefing_seen, match_skills, settings, skill_query,
 )
 from .files import (
     resolve_guarded,
@@ -446,7 +446,8 @@ class SettingsDialog(QDialog):
     """Settings, grouped. One flat list of forty fields meant that finding anything
     required reading all of it, and related options sat nowhere near each other."""
 
-    PAGES = ["Model", "Appearance", "Screen", "Memory", "Autonomy", "Services"]
+    PAGES = ["Model", "Appearance", "Briefing", "Screen", "Memory", "Autonomy",
+             "Services"]
 
     def __init__(self, current, parent=None):
         super().__init__(parent)
@@ -455,6 +456,7 @@ class SettingsDialog(QDialog):
         self.result_settings = None
         self.current = current
         self.fields = {}
+        self.labelled = {}      # key -> {shown: stored}, for dropdowns that differ
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("sideTabs")
@@ -512,13 +514,32 @@ class SettingsDialog(QDialog):
         widget.setValue(float(self._value(key, low)))
         return self._add(page, label, widget, key, tip)
 
-    def choice(self, page, key, label, options, tip=""):
+    def choice(self, page, key, label, options, tip="", values=None):
+        """A dropdown. `values` maps what is shown to what is stored, for settings
+        whose stored form is not what you would want to read - "month" against "Past
+        month", or "" against "Any time"."""
         widget = QComboBox()
         widget.addItems(list(options))
-        chosen = str(self._value(key, ""))
-        if chosen in list(options):
-            widget.setCurrentText(chosen)
+        stored = str(self._value(key, ""))
+        if values:
+            self.labelled[key] = dict(values)
+            shown = next((label_ for label_, value in values.items()
+                          if value == stored), None)
+            if shown:
+                widget.setCurrentText(shown)
+        elif stored in list(options):
+            widget.setCurrentText(stored)
         return self._add(page, label, widget, key, tip)
+
+    def check(self, page, key, label, tip=""):
+        widget = QCheckBox(label)
+        widget.setChecked(bool(self._value(key, False)))
+        return self._add(page, "", widget, key, tip)
+
+    def _forget_seen(self):
+        forget_briefing_seen()
+        self.forms["Briefing"].addRow("", QLabel("Cleared - the next briefing may "
+                                                 "repeat older stories."))
 
     def hint(self, page, text):
         label = QLabel(text)
@@ -560,6 +581,39 @@ class SettingsDialog(QDialog):
                     "Each option is a stack, so a font you do not have falls back to "
                     "something sensible for your system.")
         self.spin("Appearance", "font_size", "Font size (px):", 10, 22, 1)
+
+        self.hint("Briefing", "What's new in the things you follow, gathered before "
+                              "you ask. Interests are edited on the Briefing page "
+                              "itself.")
+        self.check("Briefing", "briefing_enabled", "Gather a briefing")
+        self.check("Briefing", "briefing_on_open", "Show it when Bonsai opens")
+        self.choice("Briefing", "briefing_time_range", "Look back:",
+                    list(BRIEFING_RANGE_LABELS),
+                    "How far back results may come from. A narrow window on a quiet "
+                    "topic returns nothing at all, which is why month is the default.",
+                    values=BRIEFING_RANGE_LABELS)
+        self.kind_boxes = {}
+        for index, kind in enumerate(BRIEFING_ALL_KINDS):
+            box = QCheckBox({"news": "News", "videos": "Videos", "images": "Images",
+                             "general": "Articles and web pages"}[kind])
+            box.setChecked(kind in (self._value("briefing_kinds") or []))
+            self.forms["Briefing"].addRow("Include:" if index == 0 else "", box)
+            self.kind_boxes[kind] = box
+        self.check("Briefing", "briefing_no_repeats",
+                   "Skip anything a previous briefing showed",
+                   f"Stories are remembered for {BRIEFING_SEEN_DAYS} days, then may "
+                   "appear again. Turn this off and every refresh re-shows whatever "
+                   "is still current.")
+        self.check("Briefing", "briefing_english_only", "English results only")
+        self.spin("Briefing", "briefing_per_topic", "Results per interest, per kind:",
+                  1, 20)
+        self.spin("Briefing", "briefing_max_age_hours", "Refetch after (hours):", 1, 168)
+        forget = QPushButton("Forget what has already been shown")
+        forget.setObjectName("ghost")
+        forget.setToolTip("Clears the record of seen stories, so the next briefing may "
+                          "repeat things you have already read.")
+        forget.clicked.connect(self._forget_seen)
+        self.forms["Briefing"].addRow("", forget)
 
         self.hint("Screen", "What Bonsai sees when you attach the screen to a message, "
                             "and how often it looks on its own.")
@@ -614,12 +668,17 @@ class SettingsDialog(QDialog):
 
     def save(self):
         result = {"services": {name: box.isChecked()
-                               for name, box in self.service_boxes.items()}}
+                               for name, box in self.service_boxes.items()},
+                  "briefing_kinds": [kind for kind, box in self.kind_boxes.items()
+                                     if box.isChecked()]}
         for key, widget in self.fields.items():
             if isinstance(widget, QLineEdit):
                 result[key] = widget.text().strip()
+            elif isinstance(widget, QCheckBox):
+                result[key] = widget.isChecked()
             elif isinstance(widget, QComboBox):
-                result[key] = widget.currentText()
+                chosen = widget.currentText()
+                result[key] = self.labelled.get(key, {}).get(chosen, chosen)
             elif isinstance(widget, QDoubleSpinBox):
                 result[key] = round(widget.value(), 2)
             else:
