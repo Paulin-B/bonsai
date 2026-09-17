@@ -113,6 +113,21 @@ try:
 finally:
     ga.store.yaml = _real_yaml
 
+print("\n-- stopping names only what the file defines, too --")
+# Stop deliberately asks for every service rather than the enabled ones, so that a
+# service switched off while running is not orphaned. It still must not name one the
+# file does not have: that fails the whole command, so Stop reported an error and left
+# everything running.
+src = APP.read_text()
+stop_body = src.split("def stop_docker")[1].split("def on_docker_stopped")[0]
+check("stop consults the compose file", "compose_services(path)" in stop_body, True)
+check("and falls back to every known service when it cannot read one",
+      "or list(DOCKER_SERVICES)" in stop_body, True)
+check("it no longer spreads DOCKER_SERVICES blindly",
+      "*DOCKER_SERVICES" in stop_body, False)
+check("but still stops more than just the enabled ones",
+      "active_services" in stop_body, False)
+
 print("\n-- so the window asks for the intersection --")
 src = APP.read_text()
 check("active_services consults the compose file",

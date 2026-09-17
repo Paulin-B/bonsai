@@ -2251,9 +2251,12 @@ class Bonsai(QWidget):
             self.health_timer.stop()
         self.status.setText("Stopping Docker services...")
         process = QProcess(self)
-        # Stop every known service, not just the enabled ones, so a service that was
-        # switched off while running doesn't get orphaned.
-        process.start("docker", self.compose_args("stop", *DOCKER_SERVICES))
+        # Every service this file defines, not just the enabled ones, so one switched
+        # off while running does not get orphaned - but only the ones it defines.
+        # Naming an absent service fails the whole command, which is how Stop came to
+        # report an error and leave everything running.
+        known = compose_services(path) or list(DOCKER_SERVICES)
+        process.start("docker", self.compose_args("stop", *known))
         if blocking:
             process.waitForFinished(15000)
             self.docker_up = False
