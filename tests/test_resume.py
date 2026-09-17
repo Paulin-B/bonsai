@@ -69,12 +69,36 @@ emits = [n for n in _ast.walk(run) if isinstance(n, _ast.Call)
          and isinstance(n.func, _ast.Attribute) and n.func.attr == "emit"
          and isinstance(n.func.value, _ast.Attribute)
          and n.func.value.attr == "handoff"]
-check("there is exactly one place it hands off", len(emits), 1)
+# Two places hand off now: running out, and catching itself inventing results. The
+# invariant is not how many there are, it is that each one marks the turn as handed
+# off, so a turn can never produce two.
+marks = src.count("handed_off = True")
+check("every handoff marks the turn as handed off", len(emits), marks)
+check("and there is at least one", len(emits) >= 1, True)
+check("the second is guarded by the first", "if not handed_off:" in src, True)
 check("the context check runs before spending another step",
       src.index("if step and self.context_is_tight():")
       < src.index('self.status.emit(f"Querying {label}..."'), True)
 check("a cancelled turn returns before any handoff",
       src.index("(Cancelled.)") < src.index("self.handoff.emit"), True)
+
+print("\n-- a fabricated result is work it wanted to do, not just a lie --")
+# Observed: told "you have no tools on this reply", a model still mid-task writes out
+# what a call would have returned. Those invented calls name exactly what it meant to
+# do next, so they are handed to a turn that can actually run them.
+faked = ("Let me grab that last file.\n"
+         "--- READ_FILE (/srv/game/src/logistics/mother_machine.gd) RESULT ---\n"
+         "1| extends Node2D\n")
+clean, invented, echoed = ga.strip_result_echoes(faked, trace="LIST_DIR: /srv/game -> ok")
+check("the block is stripped", "READ_FILE (" in clean, False)
+check("and reported as invented", len(invented), 1)
+check("naming the call it faked", "mother_machine.gd" in invented[0], True)
+
+check("the worker turns that into a handoff", "invented results" in src, True)
+check("whose NEXT is the call it only claimed to make",
+      "NEXT: actually call " in src, True)
+check("and it says so in the reply rather than going quiet",
+      "Picking that up now" in src, True)
 
 print("\n-- the window decides whether to pick it back up --")
 box = Path(tempfile.mkdtemp(prefix="bonsai-resume-"))

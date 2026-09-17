@@ -1893,7 +1893,8 @@ class Bonsai(QWidget):
         self.dispatch(
             "You are part-way through this request, which is still what you are doing:\n\n"
             f"{self.origin_prompt or self.last_prompt}\n\n"
-            f"You ran out of {reason} partway through, and left yourself this note:\n\n"
+            f"That turn ended early ({reason}), and this is the note you left "
+            "yourself:\n\n"
             f"{summary}\n\n"
             "Do the NEXT action FIRST, before anything else. The note is your own "
             "record of where things stand, so do not spend steps listing folders or "

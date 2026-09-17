@@ -179,7 +179,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,481 checks, no model server required. They run against a temporary data
+1,489 checks, no model server required. They run against a temporary data
 directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Credits

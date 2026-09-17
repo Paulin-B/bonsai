@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-16-editmessage"
+APP_VERSION = "2026-09-17-nofabrication"
 
 
 # Where the repo lives, for the optional files that ship beside it.

@@ -453,6 +453,7 @@ class Worker(QThread):
             unattended = self.config.get("unattended", False)
             exhausted = True
             ran_out = ""        # "steps" or "context" - why the turn ended early
+            handed_off = False
 
             for step in range(max_steps):
                 if self._cancelled:
@@ -657,7 +658,13 @@ class Worker(QThread):
                          else "nearly all of the context window")
                 prompt += (
                     f"\n\nYou have used {limit} for this turn, so it is ending now. "
-                    "Do not call any more tools.\n"
+                    "You have no tools on this reply.\n"
+                    "That means you CANNOT read, run or check anything further here. Do "
+                    "not write out what a call would have returned, and never write a "
+                    "line like '--- READ_FILE (path) RESULT ---': inventing a result is "
+                    "worse than stopping, it is detected and removed, and it wastes the "
+                    "turn. Anything still to do goes in NEXT below and you will have "
+                    "your tools back.\n"
                     "First, tell the user in plain text what you got done and what is "
                     "left. Claim only what the results above actually show.\n"
                     "Then write this block, which is for you, not for them - it is the "
@@ -675,6 +682,7 @@ class Worker(QThread):
                     carried = handoff_from_trace("\n".join(trace), ran_out)
                 if carried:
                     self.handoff.emit(ran_out, carried)
+                    handed_off = True
             elif abs(voice_temp - tool_temp) > 0.01:
                 # Everything above ran at the steady temperature so tool choice would
                 # not wander; say the answer again in the user's own voice. This is a
@@ -684,9 +692,10 @@ class Worker(QThread):
                 self.status.emit("Putting that in your own words...")
                 spoken = strip_tool_calls(self.ask_model(
                     system_prompt,
-                    prompt + "\n\nNow answer the user in plain text. Do not call any "
-                             "more tools, and do not claim anything the results above "
-                             "do not show.",
+                    prompt + "\n\nNow answer the user in plain text. You have no tools "
+                             "on this reply, so do not claim anything the results above "
+                             "do not show, and do not write out what a call would have "
+                             "returned - a made-up result is detected and removed.",
                     frame, temperature=voice_temp, with_tools=False, stream=True)[0])
                 if spoken.strip():
                     reply = spoken       # keep the steady reply if this one comes back empty
@@ -698,8 +707,22 @@ class Worker(QThread):
                 reply += ("\n\n\u26a0 Removed " + str(len(invented)) + " block(s) written "
                           "to look like tool output - " + ", ".join(invented[:4])
                           + ". Those calls did NOT run this turn, so everything in them "
-                          "was made up. Nothing was read from disk. Ask again and watch "
-                          "the tool list for the real calls.")
+                          "was made up. Nothing was read from disk.")
+                # Inventing a result is what it does when it still has work to do and
+                # the closing reply has taken its tools away. Those fabricated calls are
+                # therefore an accurate statement of what it wanted to do next, so hand
+                # them to a turn that can actually run them rather than losing the work.
+                if not handed_off:
+                    self.handoff.emit("invented results", (
+                        "DONE: only what the tool list above actually shows.\n"
+                        "LEFT: " + ", ".join(invented[:6]) + " were claimed but never "
+                        "run, so nothing is known about them.\n"
+                        "NEXT: actually call " + invented[0] + " and read the real "
+                        "result before saying anything about it."))
+                    handed_off = True
+                    reply += (" Picking that up now with the tools available.")
+                else:
+                    reply += (" Ask again and watch the tool list for the real calls.")
             elif echoed:
                 reply += ("\n\n(Removed " + str(len(echoed)) + " copy of a tool result "
                           "the model pasted back into its reply.)")
