@@ -130,5 +130,37 @@ w.clear_completed_tasks(); settle()
 check("completed cleared from disk", [t["text"] for t in ga.load_tasks()], ["Open one"])
 check("list redrawn", w.task_list.count(), 1)
 
+print("\n-- Remove selected: the silent no-op --")
+ga.save_tasks([{"id": i, "text": f"task {i}", "done": False, "evidence": ""}
+               for i in (1, 2, 3)], 4)
+w.refresh_tasks(); settle()
+said = []
+real_log = w.log
+w.log = lambda message, colour=None, italic=True: said.append(message)
+try:
+    # currentItem() is unset until a row has actually been clicked, so pressing the
+    # button first did nothing and said nothing about why.
+    check("rows are listed", w.task_list.count(), 3)
+    check("nothing is selected to begin with", w.task_list.selectedItems(), [])
+    w.remove_task(); settle()
+    check("nothing is removed", len(ga.load_tasks()), 3)
+    check("but it says so now", "Nothing selected" in said[-1], True)
+    check("and explains the tick box is a different thing",
+          "Clear completed" in said[-1], True)
+
+    print("\n-- and it removes several at once --")
+    w.task_list.item(0).setSelected(True)
+    w.task_list.item(2).setSelected(True)
+    w.remove_task(); settle()
+    check("both went", [t["text"] for t in ga.load_tasks()], ["task 2"])
+    check("and both are named", said[-1], "Removed: task 1, task 3")
+    check("the list redrew", w.task_list.count(), 1)
+
+    check("the list allows more than one row to be picked",
+          w.task_list.selectionMode(),
+          ga.QAbstractItemView.SelectionMode.ExtendedSelection)
+finally:
+    w.log = real_log
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

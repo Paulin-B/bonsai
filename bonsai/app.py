@@ -15,7 +15,7 @@ from PyQt6.QtGui import (
     QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
@@ -1142,6 +1142,10 @@ class Bonsai(QWidget):
 
         self.task_list = QListWidget()
         self.task_list.setObjectName("taskList")
+        # Several at once: with twenty tasks on a list, removing them one at a time is
+        # the kind of tedium that stops people pruning it at all.
+        self.task_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection)
         self.task_list.itemChanged.connect(self.on_task_toggled)
         layout.addWidget(self.task_list, stretch=1)
 
@@ -1259,10 +1263,21 @@ class Bonsai(QWidget):
         self.refresh_tasks()
 
     def remove_task(self):
-        item = self.task_list.currentItem()
-        if item is None:
+        """Remove whichever rows are highlighted.
+
+        It used to read currentItem(), which is unset until a row has actually been
+        clicked - so the button did nothing at all, and said nothing about why. The
+        tick box is a different gesture entirely: that marks a task done, and Clear
+        completed is what removes those."""
+        chosen = [item.data(Qt.ItemDataRole.UserRole)
+                  for item in self.task_list.selectedItems()]
+        if not chosen:
+            self.log("Nothing selected. Click a task's text to highlight it, then press "
+                     "Remove selected. Ticking its box marks it done instead - use "
+                     "Clear completed to remove the ticked ones.", "orange")
             return
-        self.log(handle_task(f"REMOVE {item.data(Qt.ItemDataRole.UserRole)}").splitlines()[0])
+        ids = " ".join(str(task_id) for task_id in chosen)
+        self.log(handle_task(f"REMOVE {ids}").splitlines()[0])
         self.refresh_tasks()
 
     def refresh_notes(self):
