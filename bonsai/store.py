@@ -276,6 +276,26 @@ def endpoints_from_text(text):
     return found, ""
 
 
+def unreachable_server(url):
+    """What to say when nothing answers at `url`.
+
+    Names the server as it appears in the picker, says which other ones are configured,
+    and - when there is exactly one alternative - which one to pick. A stack trace
+    about urllib3 tells you none of that."""
+    here = next((e for e in endpoints() if e["url"] == url), None)
+    name = f"'{here['name']}'" if here else url
+    others = [e["name"] for e in endpoints() if e["url"] != url]
+    message = (f"Nothing is answering at {name} ({url}). The server is probably not "
+               "running.")
+    if len(others) == 1:
+        message += f" You can switch to '{others[0]}' in the header."
+    elif others:
+        message += (" You can switch in the header to: " + ", ".join(others) + ".")
+    else:
+        message += " Check Server URL in \u2699 Settings \u2192 Model."
+    return message
+
+
 def available_models(server_url, timeout=4):
     """Model ids an OpenAI-compatible server will accept, newest API shape first.
 

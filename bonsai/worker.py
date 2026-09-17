@@ -13,7 +13,7 @@ from .config import (
     DEBUG_LOG_FILE, DEFAULTS, MEMORY_FILE,
 )
 from .store import (
-    all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault,
+    all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, unreachable_server,
 )
 from .text import (
     ACTIONS_ECHO_RE, DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, RECORD_ECHO_RE, awaits_an_answer, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_result_echoes, strip_tool_calls, unsearched_memory,
@@ -747,6 +747,11 @@ class Worker(QThread):
                 "Large attachments and long replies take a while on a local model - raise "
                 "Model request timeout in Settings, lower Max response length, or attach "
                 "fewer files.")
+        except requests.exceptions.ConnectionError:
+            # Almost always a server that is not running, which is ordinary once you
+            # have several to switch between. The raw urllib3 text says none of that.
+            self.failed.emit(unreachable_server(
+                self.config.get("server_url", DEFAULTS["server_url"])))
         except Exception as exc:
             self.failed.emit(f"Error: {exc}")
 

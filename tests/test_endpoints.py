@@ -123,6 +123,32 @@ try:
 finally:
     ga.available_models = real_models
 
+print("\n-- a server that is not running says so, not urllib3 --")
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "endpoints": [
+    {"name": "3060 (always on)", "url": A, "model": ""},
+    {"name": "Both cards - 30B", "url": B, "model": ""}]})
+said = ga.unreachable_server(B)
+check("it names the server as the picker shows it", "'Both cards - 30B'" in said, True)
+check("and the address, so a typo is visible", B in said, True)
+check("it says what is most likely wrong", "not running" in said, True)
+check("and points at the one other server", "switch to '3060 (always on)'" in said, True)
+check("without mentioning the one that failed", said.count("Both cards - 30B"), 1)
+
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "endpoints": [
+    {"name": "a", "url": A}, {"name": "b", "url": B}, {"name": "c", "url": "http://x/y"}]})
+many = ga.unreachable_server(B)
+check("with several alternatives it lists them", "a, c" in many, True)
+
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "endpoints": []})
+alone = ga.unreachable_server(B)
+check("with nowhere to switch to it points at Settings", "Settings" in alone, True)
+check("and does not offer a switch that does not exist", "switch to" in alone, False)
+
+src = APP.read_text()
+check("a refused connection is caught before the generic handler",
+      src.index("except requests.exceptions.ConnectionError:")
+      < src.index('self.failed.emit(f"Error: {exc}")'), True)
+
 print("\n-- switching stops auto mode, which belonged to the old model --")
 win.auto_running = True
 win.on_model_chosen(1)
