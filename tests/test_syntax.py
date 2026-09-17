@@ -117,5 +117,47 @@ check("a stub is still too small", "stub" in (why or ""), True)
 path, why = ga.verify_evidence(str(box / "nothere.py"))
 check("a missing file is still missing", "does not exist" in (why or ""), True)
 
+print("\n-- a tool call that came apart is never written to a file --")
+# Taken from a real .gd file that sat corrupted in a project for five days: its first
+# line was the name of a tool argument, and it carried a bare ||| with the function it
+# was meant to replace duplicated around it.
+CORRUPT = ("content=\nextends Node2D\nclass_name FlowFieldManager\n\n"
+           "func generate_field(goal):\n\t# comments only\n|||\n"
+           "func generate_field(goal):\n\tvar d = {}\n")
+why = ga.mangled_payload(CORRUPT)
+check("it is recognised as malformed", bool(why), True)
+check("and says which part gave it away", "content=" in why, True)
+
+before = box / "keep.gd"
+before.write_text("extends Node\nvar speed := 90.0\n")
+out = ga.do_write(str(before), CORRUPT)
+check("the write is refused", out.startswith("[Refused:"), True)
+check("it says nothing was written", "NOTHING was written" in out, True)
+check("and the file on disk is untouched",
+      before.read_text(), "extends Node\nvar speed := 90.0\n")
+
+check("an EDIT payload sent to WRITE is caught",
+      "EDIT separator" in ga.mangled_payload("old text\n|||\nnew text"), True)
+check("so is a faked tool-result header",
+      "tool-result header" in ga.mangled_payload(
+          "--- READ_FILE (/a.gd) RESULT ---\n1| extends Node\n"), True)
+for argument in ("path=", "old_text=", "new_text=", "text="):
+    check(f"'{argument}' alone on line 1 is caught",
+          bool(ga.mangled_payload(f"{argument}\nextends Node\n")), True)
+
+print("\n-- and ordinary files are not refused --")
+for label, body in [
+    ("plain code", "extends Node\nvar x = 1\n"),
+    ("a markdown table", "| a | b |\n|---|---|\n| 1 | 2 |\n"),
+    ("a python dict named content", "content = {}\nprint(content)\n"),
+    ("a shell pipe", "cat a | grep b | wc -l\n"),
+    ("text mentioning |||", "The separator is ||| when editing.\n"),
+    ("a docstring with dashes", '"""--- section ---"""\nx = 1\n'),
+]:
+    check(f"{label} is allowed", ga.mangled_payload(body), "")
+ok_file = box / "fine.gd"
+out = ga.do_write(str(ok_file), "extends Node\nvar speed := 90.0\n")
+check("and a normal write still happens", out.startswith("Wrote "), True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

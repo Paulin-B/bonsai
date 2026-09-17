@@ -143,6 +143,10 @@ RECORD_ECHO_RE = re.compile(r"^[ \t>*\-]*ran\s+[A-Z_]{3,12}\s+and got:.*$", re.M
 #
 # A reply must never contain one. Real results are injected by the app into the
 # prompt; anything in this shape in the reply was typed by the model.
+# Just the header line, for checking one line at a time.
+RESULT_ECHO_HEADER_RE = re.compile(
+    r"^[ \t>*]*-{2,}\s*[A-Z][A-Z_]{2,15}\s*\([^)\n]*\)\s*RESULT\s*-{2,}[ \t]*$")
+
 RESULT_ECHO_RE = re.compile(
     r"^[ \t>*]*-{2,}\s*(?P<tool>[A-Z][A-Z_]{2,15})\s*\((?P<arg>[^)\n]*)\)"
     r"\s*RESULT\s*-{2,}[ \t]*$"

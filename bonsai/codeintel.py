@@ -1,5 +1,7 @@
 """Does it parse, and what else would this change break?"""
 
+from .text import RESULT_ECHO_HEADER_RE
+
 import ast
 import json
 import os
@@ -690,6 +692,30 @@ def signature_breakage(path, before, after, roots):
             + "; ".join(hits[:6]) + ". Update them, or those files are broken now.")
 
 
+# Scaffolding from a tool call that should never reach a file. Seen for real: a .gd
+# file whose first line was "content=" and which carried a bare ||| with the function
+# it was meant to replace duplicated around it. It sat broken in the project for five
+# days, because a file that exists and is the right size looks finished.
+MANGLED_FIRST_LINE = re.compile(r"^\s*(content|path|old_text|new_text|text)\s*=\s*$")
+
+
+def mangled_payload(content):
+    """Why this content looks like a tool call that came apart, or ""."""
+    lines = (content or "").splitlines()
+    if lines and MANGLED_FIRST_LINE.match(lines[0]):
+        return (f"its first line is {lines[0].strip()!r}, the name of a tool argument "
+                "rather than anything belonging in the file")
+    for number, line in enumerate(lines, 1):
+        if line.strip() == "|||":
+            return (f"line {number} is the EDIT separator '|||' on its own, so this is "
+                    "an EDIT payload sent to WRITE - the text to find, the separator "
+                    "and the replacement would all land in the file")
+        if RESULT_ECHO_HEADER_RE.match(line):
+            return (f"line {number} is a tool-result header, which is something the app "
+                    "writes to you and never something that belongs in a file")
+    return ""
+
+
 def do_write(raw, content):
     path, err = resolve_guarded(raw)
     if err:
@@ -703,6 +729,13 @@ def do_write(raw, content):
         # empty file - and it leaves a 0-byte file that looks like finished work.
         return ("[Refused: no content to write. Send the file's actual contents with "
                 "the call; an empty file is not work.]")
+    broken = mangled_payload(content)
+    if broken:
+        # Refused rather than written-with-a-warning: the file on disk is still right,
+        # and the call can simply be made again. A corrupted file of plausible size is
+        # the far harder thing to notice.
+        return ("[Refused: that is a malformed tool call, not file contents - "
+                f"{broken}. NOTHING was written. Send just the text of the file.]")
     previous = path.stat().st_size if path.is_file() else 0
     was = None
     if path.is_file():
