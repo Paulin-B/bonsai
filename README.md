@@ -103,10 +103,22 @@ Open **⚙ Settings → Model** and set **Server URL**. Some common ones:
 | LM Studio | `http://localhost:1234/v1/chat/completions` |
 | Ollama | `http://localhost:11434/v1/chat/completions` |
 
-The **model picker in the header** lists whatever the server offers and switches
-between them without restarting anything. It takes effect on your next message, and
-the conversation carries on. llama.cpp serves one model and ignores the choice; LM
-Studio and Ollama will load the one you pick. Press ↻ after starting a server.
+The **picker in the header** switches between servers without restarting anything. It
+takes effect on your next message, and the conversation carries on.
+
+This matters because llama.cpp serves one model per process and ignores the model name
+in a request, so swapping models there means swapping servers. Set up as many as you
+like in Settings → Model, one per line:
+
+```
+3060 (always on)     | http://localhost:8085/v1/chat/completions
+3080 Ti (faster)     | http://localhost:8087/v1/chat/completions
+Ollama               | http://localhost:11434/v1/chat/completions | qwen3:32b
+```
+
+Every server is listed whether or not it is running, so one being switched off never
+hides the entry that would let you pick another. A server that loads models on demand
+(LM Studio, Ollama) also gets a row per model it reports.
 
 There is a `docker-compose.example.yml` if you want llama.cpp and SearXNG set up for
 you. Copy it to `docker-compose.yml` and edit the model path.
@@ -179,7 +191,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,507 checks, no model server required. They run against a temporary data
+1,535 checks, no model server required. They run against a temporary data
 directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Credits

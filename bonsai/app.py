@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
@@ -1302,39 +1302,65 @@ class Bonsai(QWidget):
     # -- models --
 
     def refresh_models(self, announce=False):
-        """Ask the server what it offers and show it in the picker.
+        """Fill the picker with the configured servers, and the models the live one
+        offers.
 
-        Never blocks a turn on it: if the server is down the picker keeps whatever is
-        configured, so a model set by hand is not silently lost."""
+        Every endpoint is listed without touching the network, so a server that is
+        switched off never delays startup or hides the entry that would let you pick
+        a different one. Only the endpoint in use is asked what it can serve, which is
+        what matters for LM Studio and Ollama; llama.cpp serves one model and ignores
+        the request entirely, which is exactly why endpoints are the unit here."""
+        here = self.settings.get("server_url", DEFAULTS["server_url"])
         chosen = (self.settings.get("model") or "").strip()
-        found = available_models(self.settings.get("server_url", DEFAULTS["server_url"]))
+        servers = endpoints()
         self.model_picker.blockSignals(True)
         self.model_picker.clear()
-        self.model_picker.addItem("Server default", "")
-        for name in found:
-            self.model_picker.addItem(Path(name).name, name)
-        if chosen and chosen not in found:
-            # Configured but not offered - keep it visible rather than resetting it.
-            self.model_picker.addItem(f"{Path(chosen).name} (not on server)", chosen)
-        index = self.model_picker.findData(chosen)
+        for server in servers:
+            self.model_picker.addItem(server["name"], (server["url"], server["model"]))
+        offered = available_models(here)
+        if len(offered) > 1:
+            # Somewhere that loads on demand. Offer each model under the live server.
+            live = next((s["name"] for s in servers if s["url"] == here), "Server")
+            for name in offered:
+                self.model_picker.addItem(f"{live} \u00b7 {Path(name).name}",
+                                          (here, name))
+        index = self.model_picker.findData((here, chosen))
+        if index < 0:
+            index = next((i for i in range(self.model_picker.count())
+                          if (self.model_picker.itemData(i) or ("", ""))[0] == here), 0)
         self.model_picker.setCurrentIndex(max(index, 0))
         self.model_picker.blockSignals(False)
         if announce:
-            self.log(f"Server offers {len(found)} model(s)." if found
-                     else "The server did not answer, so the model list is unchanged.",
-                     None if found else "orange")
-        return found
+            self.log(f"{len(servers)} server(s) configured; the one in use offers "
+                     f"{len(offered)} model(s)." if offered else
+                     "The server in use did not answer. The list is unchanged, and you "
+                     "can still pick another server.", None if offered else "orange")
+        return offered
 
     def on_model_chosen(self, index):
-        name = self.model_picker.itemData(index) or ""
-        if name == (self.settings.get("model") or ""):
+        url, name = self.model_picker.itemData(index) or ("", "")
+        if not url:
             return
-        self.update_setting("model", name)
+        if (url, name) == (self.settings.get("server_url"),
+                           self.settings.get("model") or ""):
+            return
+        moved = url != self.settings.get("server_url")
+        self.settings["server_url"] = url
+        self.settings["model"] = name
+        save_settings(self.settings)
         if self.auto_running:
             self.stop_auto("you changed the model")
-        self.log(f"Model set to <b>{Path(name).name}</b>. It applies from your next "
-                 "message; this conversation carries on as it is."
-                 if name else "Model set to whatever the server has loaded.")
+        if moved:
+            # The window came from the old server, so it means nothing for the new one
+            # until that one has answered once.
+            self.context_size = 0
+            self.context_label.setText("context: -")
+        self.log(f"Now using <b>{self.model_picker.itemText(index)}</b>"
+                 + (f" at {url}" if moved else "")
+                 + ". It applies from your next message; this conversation carries on "
+                   "as it is.")
+        if moved:
+            QTimer.singleShot(0, self.refresh_models)
 
     def restyle_open_views(self):
         """Redraw the parts that hold their own copy of the palette.

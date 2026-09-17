@@ -15,7 +15,7 @@ from .config import (
     DEFAULTS, DOCKER_SERVICES, _spell,
 )
 from .store import (
-    BRIEFING_ALL_KINDS, BRIEFING_RANGE_LABELS, BRIEFING_SEEN_DAYS, all_skills, forget_briefing_seen, match_skills, settings, skill_query,
+    BRIEFING_ALL_KINDS, BRIEFING_RANGE_LABELS, BRIEFING_SEEN_DAYS, all_skills, endpoints_as_text, endpoints_from_text, forget_briefing_seen, match_skills, settings, skill_query,
 )
 from .files import (
     resolve_guarded,
@@ -552,7 +552,22 @@ class SettingsDialog(QDialog):
     def _build(self):
         self.hint("Model", "Any OpenAI-compatible endpoint: llama.cpp, LM Studio, "
                            "Ollama, or a remote API.")
-        self.line("Model", "server_url", "Server URL:")
+        self.line("Model", "server_url", "Server URL:",
+                  "The server in use. Picking a different one in the header changes "
+                  "this for you.")
+        self.hint("Model", "Servers you can switch between from the header, one per "
+                          "line as 'Name | url' with an optional third field naming a "
+                          "model. llama.cpp serves one model per process and ignores "
+                          "the model name, so a second server is how you swap models "
+                          "there: another container on another GPU, or a bigger model "
+                          "across both.")
+        self.endpoints_editor = QTextEdit()
+        self.endpoints_editor.setObjectName("notesEditor")
+        self.endpoints_editor.setAcceptRichText(False)
+        self.endpoints_editor.setFixedHeight(84)
+        self.endpoints_editor.setPlainText(
+            endpoints_as_text(self.current.get("endpoints") or []))
+        self.forms["Model"].addRow("Servers:", self.endpoints_editor)
         self.line("Model", "model", "Model name:",
                   "Sent with each request. Blank uses whatever the server has loaded - "
                   "llama.cpp serves one model and ignores this; LM Studio and Ollama "
@@ -667,8 +682,15 @@ class SettingsDialog(QDialog):
             self.service_boxes[name] = box
 
     def save(self):
+        parsed, bad = endpoints_from_text(self.endpoints_editor.toPlainText())
+        if bad:
+            self.endpoints_editor.setToolTip(f"Not saved: {bad}")
+            self.tabs.setCurrentIndex(self.PAGES.index("Model"))
+            self.endpoints_editor.setFocus()
+            return                      # refuse rather than drop a server they typed
         result = {"services": {name: box.isChecked()
                                for name, box in self.service_boxes.items()},
+                  "endpoints": parsed,
                   "briefing_kinds": [kind for kind, box in self.kind_boxes.items()
                                      if box.isChecked()]}
         for key, widget in self.fields.items():

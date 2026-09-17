@@ -217,6 +217,65 @@ def search_memory(query):
             + "\n".join(f"- {fact}" for fact in recent))
 
 
+def endpoints():
+    """The servers Bonsai can be pointed at, always at least one.
+
+    A single server_url is treated as one unnamed endpoint, so everything downstream
+    can assume a list and nobody has to special-case the common setup."""
+    config = settings()
+    found = []
+    for entry in config.get("endpoints") or []:
+        if not isinstance(entry, dict):
+            continue
+        url = str(entry.get("url") or "").strip()
+        if not url.startswith("http"):
+            continue            # a line that is not a server is not an endpoint
+        found.append({"name": str(entry.get("name") or url).strip(),
+                      "url": url,
+                      "model": str(entry.get("model") or "").strip()})
+    if not found:
+        found = [{"name": "Server",
+                  "url": config.get("server_url", DEFAULTS["server_url"]),
+                  "model": str(config.get("model") or "").strip()}]
+    return found
+
+
+def endpoints_as_text(items):
+    """One endpoint per line, as 'Name | url | model'. The model is optional."""
+    lines = []
+    for entry in items:
+        row = f"{entry['name']} | {entry['url']}"
+        if entry.get("model"):
+            row += f" | {entry['model']}"
+        lines.append(row)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def endpoints_from_text(text):
+    """Parse the editor back, or return (None, why not).
+
+    Refuses rather than dropping a malformed line: silently discarding a server
+    someone typed is worse than telling them the line is wrong."""
+    found, seen = [], set()
+    for number, line in enumerate((text or "").splitlines(), 1):
+        if not line.strip():
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 2:
+            return None, f"line {number} needs at least 'Name | url'"
+        name, url = parts[0], parts[1]
+        model = parts[2] if len(parts) > 2 else ""
+        if not name:
+            return None, f"line {number} has no name"
+        if not url.startswith("http"):
+            return None, f"line {number}: {url!r} is not a URL"
+        if name.lower() in seen:
+            return None, f"'{name}' appears twice"
+        seen.add(name.lower())
+        found.append({"name": name, "url": url, "model": model})
+    return found, ""
+
+
 def available_models(server_url, timeout=4):
     """Model ids an OpenAI-compatible server will accept, newest API shape first.
 

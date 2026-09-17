@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-17-mangled"
+APP_VERSION = "2026-09-17-endpoints"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -112,6 +112,11 @@ DEFAULTS = {
     # llama.cpp serves one model and ignores it, while LM Studio and Ollama will
     # load the one named here.
     "model": "",
+    # Named servers to switch between from the header. llama.cpp serves one model per
+    # process and ignores the model field entirely, so swapping models there means
+    # swapping endpoints - a second container on the other GPU, or a bigger model on
+    # both. Empty means "just use server_url".
+    "endpoints": [],
     "theme": "Midnight",
     "font": "System",
     "font_size": 13,
