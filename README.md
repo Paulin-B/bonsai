@@ -111,10 +111,14 @@ in a request, so swapping models there means swapping servers. Set up as many as
 like in Settings → Model, one per line:
 
 ```
-3060 (always on)     | http://localhost:8085/v1/chat/completions
-3080 Ti (faster)     | http://localhost:8087/v1/chat/completions
-Ollama               | http://localhost:11434/v1/chat/completions | qwen3:32b
+3060 (always on) | http://localhost:8085/v1/chat/completions |  | ~/ai/small.yml
+3080 Ti (faster) | http://localhost:8087/v1/chat/completions |  | ~/ai/fast.yml
+Ollama           | http://localhost:11434/v1/chat/completions | qwen3:32b
 ```
+
+The third field names a model, for servers that load on demand. The fourth names the
+compose file that starts that server, so the Docker button follows whichever one you
+are using.
 
 Every server is listed whether or not it is running, so one being switched off never
 hides the entry that would let you pick another. A server that loads models on demand
@@ -191,7 +195,7 @@ point at your own project folder.
 QT_QPA_PLATFORM=offscreen python3 tests/run_all.py
 ```
 
-1,544 checks, no model server required. They run against a temporary data
+1,551 checks, no model server required. They run against a temporary data
 directory, so a test run cannot touch your own settings, memory or chats.
 
 ## Credits

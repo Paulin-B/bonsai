@@ -556,11 +556,13 @@ class SettingsDialog(QDialog):
                   "The server in use. Picking a different one in the header changes "
                   "this for you.")
         self.hint("Model", "Servers you can switch between from the header, one per "
-                          "line as 'Name | url' with an optional third field naming a "
-                          "model. llama.cpp serves one model per process and ignores "
-                          "the model name, so a second server is how you swap models "
-                          "there: another container on another GPU, or a bigger model "
-                          "across both.")
+                          "line as 'Name | url', optionally followed by a model name "
+                          "and the compose file that starts it. llama.cpp serves one "
+                          "model per process and ignores the model name, so a second "
+                          "server is how you swap models there: another container on "
+                          "another GPU, or a bigger model across both. The Docker "
+                          "button uses the compose file of whichever server you are "
+                          "on.")
         self.endpoints_editor = QTextEdit()
         self.endpoints_editor.setObjectName("notesEditor")
         self.endpoints_editor.setAcceptRichText(False)

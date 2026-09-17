@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, compose_for, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
@@ -2139,7 +2139,7 @@ class Bonsai(QWidget):
     # -- docker --
 
     def compose_args(self, *extra):
-        path = Path(self.settings.get("compose_path", "")).expanduser()
+        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
         # --project-directory is pinned so Compose identifies the project the same way
         # regardless of the shell's working directory.
         return ["compose", "-f", str(path), "--project-directory", str(path.parent), *extra]
@@ -2157,7 +2157,7 @@ class Bonsai(QWidget):
         """Stop specific services without touching the rest - used when one is switched
         off in Settings, so it doesn't keep running until the next full restart."""
         names = [n for n in names if n in DOCKER_SERVICES]
-        path = Path(self.settings.get("compose_path", "")).expanduser()
+        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
         if not names or not path.exists():
             return
         process = QProcess(self)
@@ -2166,9 +2166,11 @@ class Bonsai(QWidget):
         self.log(f"Stopping {', '.join(names)} - switched off in Settings.")
 
     def start_docker(self):
-        path = Path(self.settings.get("compose_path", "")).expanduser()
+        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
         if not path.exists():
-            self.log(f"docker-compose.yml not found at {path} - set it in \u2699 Settings.", "red")
+            self.log(f"No compose file at {path}, so the services for the server you are using "
+         "cannot be started. Set one on that server's line in \u2699 Settings "
+         "\u2192 Model, or set Docker compose file under Services.", "red")
             self.docker_button.setEnabled(True)
             return
         self.status.setText("Starting Docker services...")
@@ -2220,7 +2222,7 @@ class Bonsai(QWidget):
                      "`docker compose logs bonsai-api`.", "red")
 
     def stop_docker(self, blocking=False):
-        path = Path(self.settings.get("compose_path", "")).expanduser()
+        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
         if not path.exists():
             return
         if self.health_timer:

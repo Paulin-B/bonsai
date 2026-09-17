@@ -232,12 +232,28 @@ def endpoints():
             continue            # a line that is not a server is not an endpoint
         found.append({"name": str(entry.get("name") or url).strip(),
                       "url": url,
-                      "model": str(entry.get("model") or "").strip()})
+                      "model": str(entry.get("model") or "").strip(),
+                      "compose": str(entry.get("compose") or "").strip()})
     if not found:
         found = [{"name": "Server",
                   "url": config.get("server_url", DEFAULTS["server_url"]),
-                  "model": str(config.get("model") or "").strip()}]
+                  "model": str(config.get("model") or "").strip(),
+                  "compose": str(config.get("compose_path") or "").strip()}]
     return found
+
+
+def compose_for(url=None):
+    """The compose file that starts the server at `url`.
+
+    Each server can name its own, because one compose file stopped being the answer
+    the moment there was more than one server to switch between. Falls back to the
+    single compose_path setting, which is what a one-server setup has."""
+    config = settings()
+    here = url or config.get("server_url", DEFAULTS["server_url"])
+    match = next((e for e in endpoints() if e["url"] == here), None)
+    if match and match.get("compose"):
+        return match["compose"]
+    return config.get("compose_path", "")
 
 
 def endpoints_as_text(items):
@@ -245,7 +261,9 @@ def endpoints_as_text(items):
     lines = []
     for entry in items:
         row = f"{entry['name']} | {entry['url']}"
-        if entry.get("model"):
+        if entry.get("compose"):
+            row += f" | {entry.get('model', '')} | {entry['compose']}"
+        elif entry.get("model"):
             row += f" | {entry['model']}"
         lines.append(row)
     return "\n".join(lines) + ("\n" if lines else "")
@@ -265,6 +283,7 @@ def endpoints_from_text(text):
             return None, f"line {number} needs at least 'Name | url'"
         name, url = parts[0], parts[1]
         model = parts[2] if len(parts) > 2 else ""
+        compose = parts[3] if len(parts) > 3 else ""
         if not name:
             return None, f"line {number} has no name"
         if not url.startswith("http"):
@@ -272,7 +291,7 @@ def endpoints_from_text(text):
         if name.lower() in seen:
             return None, f"'{name}' appears twice"
         seen.add(name.lower())
-        found.append({"name": name, "url": url, "model": model})
+        found.append({"name": name, "url": url, "model": model, "compose": compose})
     return found, ""
 
 

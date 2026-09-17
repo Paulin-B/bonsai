@@ -25,7 +25,7 @@ ga.save_settings({**ga.DEFAULTS, "server_url": A, "model": ""})
 check("one endpoint is synthesised", len(ga.endpoints()), 1)
 check("pointing at the configured server", ga.endpoints()[0]["url"], A)
 check("so nothing downstream needs a special case",
-      set(ga.endpoints()[0]), {"name", "url", "model"})
+      set(ga.endpoints()[0]), {"name", "url", "model", "compose"})
 
 print("\n-- several named servers --")
 ga.save_settings({**ga.DEFAULTS, "server_url": A, "endpoints": [
@@ -45,8 +45,8 @@ check("and if none survive it falls back to server_url",
       ga.endpoints()[0]["url"], A)
 
 print("\n-- the text form round-trips --")
-items = [{"name": "3060", "url": A, "model": ""},
-         {"name": "Ollama", "url": B, "model": "qwen3:32b"}]
+items = [{"name": "3060", "url": A, "model": "", "compose": ""},
+         {"name": "Ollama", "url": B, "model": "qwen3:32b", "compose": ""}]
 text = ga.endpoints_as_text(items)
 check("a model is only written when set", text.count("|"), 3)
 back, why = ga.endpoints_from_text(text)
@@ -54,6 +54,27 @@ check("it comes back the same", back, items)
 check("with no complaint", why, "")
 check("blank lines are ignored", ga.endpoints_from_text("\n\n" + text)[0], items)
 check("an empty list is allowed", ga.endpoints_from_text(""), ([], ""))
+
+print("\n-- each server can name the compose file that starts it --")
+# One compose file stopped being the answer the moment there was more than one server.
+withfile = [{"name": "30B", "url": B, "model": "", "compose": "/srv/big.yml"}]
+text = ga.endpoints_as_text(withfile)
+check("it is written out", "/srv/big.yml" in text, True)
+check("and read back", ga.endpoints_from_text(text)[0], withfile)
+check("the empty model slot is kept so the columns line up", text.count("|"), 3)
+
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback.yml",
+                  "endpoints": [{"name": "small", "url": A, "compose": "/srv/small.yml"},
+                                {"name": "big", "url": B, "compose": "/srv/big.yml"}]})
+check("the file for the server in use is chosen", ga.compose_for(), "/srv/big.yml")
+check("and for another named one", ga.compose_for(A), "/srv/small.yml")
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback.yml",
+                  "endpoints": [{"name": "big", "url": B}]})
+check("a server with no file of its own falls back to the single setting",
+      ga.compose_for(), "/srv/fallback.yml")
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback.yml",
+                  "endpoints": []})
+check("and so does a one-server setup", ga.compose_for(), "/srv/fallback.yml")
 
 print("\n-- a malformed line is refused rather than silently dropped --")
 for bad, why_part in [
