@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, compose_for, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
@@ -2145,10 +2145,17 @@ class Bonsai(QWidget):
         return ["compose", "-f", str(path), "--project-directory", str(path.parent), *extra]
 
     def active_services(self):
-        """Compose services to run: the required ones, plus whatever is switched on."""
+        """Compose services to run: the required ones, plus whatever is switched on,
+        minus anything the chosen compose file does not define.
+
+        Naming a service the file does not have fails the whole command with "no such
+        service", so a compose file that only brings up a model server must not be
+        asked for a search backend as well."""
         wanted = self.settings.get("services", DEFAULTS["services"])
-        return [name for name, (_what, required) in DOCKER_SERVICES.items()
-                if required or wanted.get(name, False)]
+        asked = [name for name, (_what, required) in DOCKER_SERVICES.items()
+                 if required or wanted.get(name, False)]
+        defined = compose_services(compose_for(self.settings.get("server_url")))
+        return [name for name in asked if name in defined] if defined else asked
 
     def toggle_docker(self):
         self.stop_docker() if self.docker_up else self.start_docker()

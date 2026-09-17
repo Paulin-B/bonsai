@@ -1,6 +1,6 @@
 import importlib.util, tempfile, sys
 from pathlib import Path
-from bonsai_under_test import load
+from bonsai_under_test import APP, load
 ga = load()
 ok = fail = 0
 def check(label, got, want):
@@ -62,6 +62,63 @@ dialog.save()
 check("save round-trips the choices",
       dialog.result_settings["services"],
       {"bonsai-api": True, "searxng": False, "bonsai-observer": True})
+
+print("\n-- only services the compose file defines are ever asked for --")
+# Naming one it does not have fails the whole command with "no such service", which is
+# what happened the first time a model-only compose file was asked for searxng too.
+import tempfile as _tf
+from pathlib import Path as _P
+_box = _P(_tf.mkdtemp(prefix="bonsai-compose-"))
+
+FULL = """services:
+  bonsai-api:
+    image: x
+    environment:
+      - A=1
+    ports:
+      - "1:1"
+  searxng:
+    image: y
+    volumes:
+      - ./a:/b
+  bonsai-observer:
+    image: z
+
+volumes:
+  shared:
+"""
+ONLY_API = "services:\n  bonsai-api:\n    image: x\n    environment:\n      - A=1\n"
+(_box / "full.yml").write_text(FULL)
+(_box / "api.yml").write_text(ONLY_API)
+
+check("every service is found", ga.compose_services(_box / "full.yml"),
+      ["bonsai-api", "searxng", "bonsai-observer"])
+check("a model-only file offers just the one", ga.compose_services(_box / "api.yml"),
+      ["bonsai-api"])
+check("nested keys are not mistaken for services",
+      "environment" in ga.compose_services(_box / "full.yml"), False)
+check("nor is a later top-level block",
+      "volumes" in ga.compose_services(_box / "full.yml"), False)
+check("a file that is not there gives nothing", ga.compose_services("/nope/x.yml"), [])
+
+# The same answers without PyYAML, since it is an optional dependency.
+_real_yaml = ga.store.yaml
+ga.store.yaml = None
+try:
+    check("the text fallback agrees on a full file",
+          ga.compose_services(_box / "full.yml"),
+          ["bonsai-api", "searxng", "bonsai-observer"])
+    check("and on a model-only one", ga.compose_services(_box / "api.yml"),
+          ["bonsai-api"])
+finally:
+    ga.store.yaml = _real_yaml
+
+print("\n-- so the window asks for the intersection --")
+src = APP.read_text()
+check("active_services consults the compose file",
+      "compose_services(compose_for(" in src, True)
+check("and asks for everything when the file cannot be read",
+      "if defined else asked" in src, True)
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

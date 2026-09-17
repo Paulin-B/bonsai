@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import requests
 from .config import (
-    BRIEFING_FILE, BRIEFING_SEEN_FILE, CHARACTER_FILE, CHARACTER_SEED, DEFAULTS, INTERESTS_FILE, MEMORY_FILE, PROJECTS_FILE, SCREEN_LOG_FILE, SETTINGS_FILE, SKILLS_FILE, TRUSTED_PATHS_FILE,
+    BRIEFING_FILE, BRIEFING_SEEN_FILE, CHARACTER_FILE, CHARACTER_SEED, DEFAULTS, INTERESTS_FILE, MEMORY_FILE, PROJECTS_FILE, SCREEN_LOG_FILE, SETTINGS_FILE, SKILLS_FILE, TRUSTED_PATHS_FILE, yaml,
 )
 
 
@@ -240,6 +240,46 @@ def endpoints():
                   "model": str(config.get("model") or "").strip(),
                   "compose": str(config.get("compose_path") or "").strip()}]
     return found
+
+
+def compose_services(path):
+    """Service names a compose file actually defines, or [] if it cannot be read.
+
+    Asking docker for a service the file does not have fails the whole command with
+    "no such service", so a compose file that only brings up a model server must not
+    be asked for a search backend as well."""
+    try:
+        text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    if yaml is not None:
+        try:
+            loaded = yaml.safe_load(text) or {}
+            if isinstance(loaded.get("services"), dict):
+                return [str(name) for name in loaded["services"]]
+        except Exception:
+            pass                # fall through to the text scan rather than give up
+    # No YAML parser, or the file did not parse: read the one block we care about.
+    # The indent of the first service is what a service looks like; anything deeper is
+    # one of its keys, and "environment" is not a service.
+    names, inside, indent = [], False, None
+    for line in text.splitlines():
+        if re.match(r"^services:\s*$", line):
+            inside = True
+            continue
+        if not inside or not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            break               # a new top-level key ends the services block
+        found = re.match(r"^([ \t]+)([A-Za-z0-9._-]+):\s*$", line)
+        if not found:
+            continue
+        depth, name = found.group(1), found.group(2)
+        if indent is None:
+            indent = depth
+        if depth == indent:
+            names.append(name)
+    return names
 
 
 def compose_for(url=None):
