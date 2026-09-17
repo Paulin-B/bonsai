@@ -1,0 +1,27 @@
+# Private web search for Bonsai's SEARCH tool, deliberately kept in its own file.
+#
+#   docker compose -f docker-compose.searxng.yml up -d
+#
+# It lives apart from the model server because it has nothing to do with which model
+# is loaded. If you keep several model compose files and swap between them, declaring
+# searxng in each one means "compose down" on the file you are leaving tears out the
+# search container too, and naming searxng against a file that does not define it
+# fails the whole command. In its own file it simply stays up.
+#
+# Bonsai does not need this. Turn "Web search" off in Settings and nothing else changes.
+
+# Its own compose project name, so a model file never counts it as an orphan:
+# "docker compose down --remove-orphans" on a model file would otherwise delete it.
+name: searxng
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/
+    volumes:
+      - ./searxng:/etc/searxng
+    restart: unless-stopped

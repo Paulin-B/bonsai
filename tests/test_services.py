@@ -135,5 +135,74 @@ check("active_services consults the compose file",
 check("and asks for everything when the file cannot be read",
       "if defined else asked" in src, True)
 
+print("\n-- whether search works is asked, not assumed --")
+# The warning used to read the services checkbox: "searxng is unticked, so SEARCH will
+# fail." That was wrong in both directions once searxng moved into its own compose file
+# - unticked but running, or ticked but never started. Ask the server instead.
+class _Reply:
+    def __init__(self, code): self.status_code = code
+class _Requests:
+    def __init__(self, reply): self.reply, self.asked = reply, []
+    def get(self, url, **kw):
+        self.asked.append((url, kw))
+        if isinstance(self.reply, Exception): raise self.reply
+        return self.reply
+
+real_requests = ga.store.requests
+ga.save_settings({**ga.DEFAULTS, "searxng_url": "http://localhost:8081/search"})
+try:
+    ga.store.requests = fake = _Requests(_Reply(200))
+    check("a searxng that answers is up", ga.search_backend_up(), True)
+    check("and it was asked at the configured url", fake.asked[0][0],
+          "http://localhost:8081/search")
+    check("with a real query, since some builds 403 an empty one",
+          fake.asked[0][1]["params"]["q"] != "", True)
+    ga.store.requests = _Requests(_Reply(503))
+    check("a container that is up but broken is not up", ga.search_backend_up(), False)
+    ga.store.requests = _Requests(_Reply(403))
+    check("but a limiter block still counts as running", ga.search_backend_up(), True)
+    ga.store.requests = _Requests(ConnectionError("refused"))
+    check("nothing listening is not up", ga.search_backend_up(), False)
+    ga.store.requests = _Requests(Exception("boom"))
+    check("and any other failure is not up either", ga.search_backend_up(), False)
+finally:
+    ga.store.requests = real_requests
+
+print("\n-- and the warning follows the probe, not the checkbox --")
+class _Dialog:
+    result_settings = None
+    def __init__(self, settings, parent): _Dialog.result_settings = dict(settings)
+    def exec(self): return ga.QDialog.DialogCode.Accepted
+
+real_dialog, real_probe = ga.app.SettingsDialog, ga.app.search_backend_up
+try:
+    ga.app.SettingsDialog = _Dialog
+    for reachable, services, expect_warning in [
+        (False, {"searxng": True},  True),   # ticked, but nothing is listening
+        (True,  {"searxng": False}, False),  # unticked, yet running in its own file
+        (True,  {"searxng": True},  False),
+        (False, {"searxng": False}, True),
+    ]:
+        ga.app.search_backend_up = lambda reachable=reachable: reachable
+        w.settings["web_search_enabled"] = True
+        w.settings["services"] = {"bonsai-api": True, **services}
+        _Dialog.result_settings = None
+        lines = []
+        w.log = lambda text, colour=None, lines=lines: lines.append(text)
+        w.open_settings()
+        warned = any("Web search is on" in line for line in lines)
+        check(f"reachable={reachable} ticked={services['searxng']} -> warn={expect_warning}",
+              warned, expect_warning)
+
+    ga.app.search_backend_up = lambda: False
+    w.settings["web_search_enabled"] = False
+    lines = []
+    w.log = lambda text, colour=None, lines=lines: lines.append(text)
+    w.open_settings()
+    check("no warning when web search is off", any("Web search is on" in l for l in lines), False)
+finally:
+    ga.app.SettingsDialog, ga.app.search_backend_up = real_dialog, real_probe
+    del w.log
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

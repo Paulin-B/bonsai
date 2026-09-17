@@ -124,8 +124,9 @@ Every server is listed whether or not it is running, so one being switched off n
 hides the entry that would let you pick another. A server that loads models on demand
 (LM Studio, Ollama) also gets a row per model it reports.
 
-There is a `docker-compose.example.yml` if you want llama.cpp and SearXNG set up for
-you. Copy it to `docker-compose.yml` and edit the model path.
+There is a `docker-compose.example.yml` if you want llama.cpp set up for you. Copy it
+to `docker-compose.yml` and edit the model path. Web search is a separate file,
+`docker-compose.searxng.yml`, so that swapping models never takes search down with it.
 
 ## Themes
 

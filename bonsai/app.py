@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
@@ -1538,10 +1538,11 @@ class Bonsai(QWidget):
             now = self.settings.get("services", {})
             self.stop_services([name for name, on in was_running.items()
                                 if on and not now.get(name, False)])
-            if self.settings.get("web_search_enabled") and not now.get("searxng", False):
-                self.log("\u26a0 Web search is on but the searxng service is switched off, "
-                         "so SEARCH will fail. Turn one of the two off, or start searxng.",
-                         "orange")
+            if self.settings.get("web_search_enabled") and not search_backend_up():
+                self.log("\u26a0 Web search is on but nothing is answering at "
+                         f"{self.settings.get('searxng_url', DEFAULTS['searxng_url'])}, "
+                         "so SEARCH will fail. Start it, or turn web search off in "
+                         "\u2699 Settings \u2192 Screen.", "orange")
 
     # -- drag and drop --
 

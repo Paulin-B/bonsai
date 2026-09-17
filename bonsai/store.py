@@ -242,6 +242,22 @@ def endpoints():
     return found
 
 
+def search_backend_up(timeout=3):
+    """Whether the SEARCH tool has anything to talk to.
+
+    Asked of the server rather than inferred from the services setting: search does not
+    have to be in a compose file at all - it is better off in its own, since it has
+    nothing to do with which model is loaded - and a checkbox says nothing about
+    whether the thing is actually running."""
+    url = settings().get("searxng_url", DEFAULTS["searxng_url"])
+    try:
+        response = requests.get(url, params={"q": "ping", "format": "json"},
+                                timeout=timeout)
+        return response.status_code < 500
+    except Exception:
+        return False
+
+
 def compose_services(path):
     """Service names a compose file actually defines, or [] if it cannot be read.
 

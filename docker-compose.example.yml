@@ -1,8 +1,11 @@
-# A llama.cpp server for Bonsai, plus SearXNG for private web search.
+# A llama.cpp server for Bonsai.
 #
 #   cp docker-compose.example.yml docker-compose.yml
 #   # edit the model paths below, then:
-#   docker compose up -d bonsai-api searxng
+#   docker compose up -d bonsai-api
+#
+# Web search lives in docker-compose.searxng.yml, on purpose: it is not part of any
+# model, so keeping it separate means swapping models never takes search down with it.
 #
 # Bonsai talks to any OpenAI-compatible endpoint, so you can ignore this file
 # entirely and point "Server URL" in Settings at LM Studio, Ollama, or a remote API.
@@ -29,21 +32,12 @@ services:
       -m /models/your-model.gguf
       --mmproj /models/your-mmproj.gguf
       --jinja
+      # -ngl 99 offloads every layer and, in doing so, turns OFF llama.cpp's own
+      # "does this fit?" check. If you get an out-of-memory error at load, delete
+      # this line before you start cutting context - the default fits automatically.
       -ngl 99
       -c 32768
       -np 1
       --host 0.0.0.0
       --port 8080
-    restart: unless-stopped
-
-  # Private web search. Without it, turn "Web search" off in Settings.
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
-    ports:
-      - "127.0.0.1:8081:8080"
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:8081/
-    volumes:
-      - ./searxng:/etc/searxng
     restart: unless-stopped

@@ -668,7 +668,10 @@ class SettingsDialog(QDialog):
                   "0 turns self-resumption off.")
 
         self.hint("Services", "Optional. Bonsai works without Docker; these only matter "
-                              "if you use the bundled compose file.")
+                              "if you use a compose file. A service your file does not "
+                              "define is skipped rather than failing the command, so "
+                              "search is happiest in a compose file of its own - it has "
+                              "nothing to do with which model is loaded.")
         self.line("Services", "searxng_url", "SearXNG URL:")
         self.line("Services", "compose_path", "Docker compose file:")
         self.line("Services", "monitor_script", "Monitor script:")
