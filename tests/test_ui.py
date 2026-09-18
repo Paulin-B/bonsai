@@ -71,5 +71,66 @@ check("trusted folder added and listed", w.trust_picker.count() >= 1, True)
 check("composer wired to send", w.send_button.isEnabled(), True)
 check("stop starts disabled", w.stop_button.isEnabled(), False)
 
+print("\n-- the settings pages fit, whatever is on them --")
+# A page taller than the dialog used to squeeze its rows past their own minimum heights
+# and draw them on top of each other: the wrapped note about Servers landed across the
+# box below it. Measured from real geometry, and only after raising each tab, because
+# a page that has never been shown reports a default 640x480 and would pass anything.
+app.setStyleSheet(ga.stylesheet("Midnight", "System", 13))
+settings = dict(ga.DEFAULTS)
+settings["endpoints"] = [
+    {"name": f"a rather long server name number {n}",
+     "url": f"http://localhost:808{n}/v1/chat/completions", "model": "",
+     "compose": f"/media/D/Projects/Local_AI/docker-compose.number-{n}.yml"}
+    for n in range(3)]
+dialog = ga.SettingsDialog(settings, None)
+dialog.resize(560, 562)      # the size it opens at on a laptop screen
+dialog.show()
+
+def rows_of(page):
+    form = dialog.forms[page]
+    found = []
+    for i in range(form.rowCount()):
+        for role in (ga.QFormLayout.ItemRole.LabelRole,
+                     ga.QFormLayout.ItemRole.FieldRole,
+                     ga.QFormLayout.ItemRole.SpanningRole):
+            item = form.itemAt(i, role)
+            if item and item.widget():
+                found.append((i, item.widget()))
+    return found
+
+for index, page in enumerate(dialog.PAGES):
+    dialog.tabs.setCurrentIndex(index)
+    settle(6)
+    rows = rows_of(page)
+    clashes = {(a_row, b_row)
+               for a_row, a in rows for b_row, b in rows
+               if a_row < b_row and a.geometry().isValid() and b.geometry().isValid()
+               and a.geometry().intersects(b.geometry())}
+    check(f"nothing overlaps on {page}", clashes, set())
+
+check("every page scrolls rather than squeezing",
+      all(isinstance(dialog.tabs.widget(i), ga.QScrollArea)
+          for i in range(dialog.tabs.count())), True)
+
+print("\n-- and the Model page reads in the right order --")
+dialog.tabs.setCurrentIndex(0)
+settle(6)
+labels = [w.text() for _, w in rows_of("Model")
+          if isinstance(w, ga.QLabel) and w.text().endswith(":")]
+check("the server in use comes first", labels[0], "Server URL:")
+check("then what it is serving", labels[1], "Model name:")
+check("and the list you switch between sits under that", labels[2], "Servers:")
+check("before the numbers", labels[3], "Max response length (tokens):")
+
+check("the servers box does not wrap, so one line is one server",
+      dialog.endpoints_editor.lineWrapMode(), ga.QTextEdit.LineWrapMode.NoWrap)
+shown = dialog.endpoints_editor.toPlainText().splitlines()
+check("all three servers are on their own line", len(shown), 3)
+check("and the box is tall enough to show them at once",
+      dialog.endpoints_editor.height()
+      >= dialog.endpoints_editor.fontMetrics().lineSpacing() * 3, True)
+dialog.close()
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

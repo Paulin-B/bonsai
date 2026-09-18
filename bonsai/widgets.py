@@ -9,7 +9,7 @@ from PyQt6.QtGui import (
     QColor, QFontMetrics, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 from .config import (
     DEFAULTS, DOCKER_SERVICES, _spell,
@@ -463,13 +463,23 @@ class SettingsDialog(QDialog):
         self.tabs.setDocumentMode(True)
         self.forms = {}
         for name in self.PAGES:
-            page = QWidget()
-            wrap = QVBoxLayout(page)
+            inner = QWidget()
+            wrap = QVBoxLayout(inner)
             wrap.setContentsMargins(4, 10, 4, 4)
             form = QFormLayout()
             form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
             wrap.addLayout(form)
             wrap.addStretch(1)
+            # A page taller than the dialog has to scroll. Without this the form layout
+            # squeezes rows past their own minimum heights and they draw on top of each
+            # other, which is what a long page looked like on a laptop screen.
+            page = QScrollArea()
+            page.setWidget(inner)
+            page.setWidgetResizable(True)
+            page.setFrameShape(QFrame.Shape.NoFrame)
+            page.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            page.viewport().setAutoFillBackground(False)
+            inner.setAutoFillBackground(False)
             self.forms[name] = form
             self.tabs.addTab(page, name)
 
@@ -545,6 +555,13 @@ class SettingsDialog(QDialog):
         label = QLabel(text)
         label.setObjectName("notesPath")
         label.setWordWrap(True)
+        # A wrapped label reports the height of a single line unless the layout is told
+        # to ask how tall it needs to be at the width it is given. Without this the form
+        # hands it one line and the rest of the sentence is drawn over the row below.
+        policy = label.sizePolicy()
+        policy.setHeightForWidth(True)
+        policy.setVerticalPolicy(QSizePolicy.Policy.MinimumExpanding)
+        label.setSizePolicy(policy)
         self.forms[page].addRow(label)
 
     # -- the pages --
@@ -555,6 +572,10 @@ class SettingsDialog(QDialog):
         self.line("Model", "server_url", "Server URL:",
                   "The server in use. Picking a different one in the header changes "
                   "this for you.")
+        self.line("Model", "model", "Model name:",
+                  "Sent with each request. Blank uses whatever the server has loaded - "
+                  "llama.cpp serves one model and ignores this; LM Studio and Ollama "
+                  "will load the one you name.")
         self.hint("Model", "Servers you can switch between from the header, one per "
                           "line as 'Name | url', optionally followed by a model name "
                           "and the compose file that starts it. llama.cpp serves one "
@@ -566,14 +587,13 @@ class SettingsDialog(QDialog):
         self.endpoints_editor = QTextEdit()
         self.endpoints_editor.setObjectName("notesEditor")
         self.endpoints_editor.setAcceptRichText(False)
+        # One server per line, as the note above says: wrapping turned a three-server
+        # list into nine lines and only the first one was in view.
+        self.endpoints_editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.endpoints_editor.setFixedHeight(84)
         self.endpoints_editor.setPlainText(
             endpoints_as_text(self.current.get("endpoints") or []))
         self.forms["Model"].addRow("Servers:", self.endpoints_editor)
-        self.line("Model", "model", "Model name:",
-                  "Sent with each request. Blank uses whatever the server has loaded - "
-                  "llama.cpp serves one model and ignores this; LM Studio and Ollama "
-                  "will load the one you name.")
         self.spin("Model", "max_tokens", "Max response length (tokens):", 32, 32768, 64,
                   "Roughly 100 tokens per 10 lines of code. It has to fit in the context "
                   "window alongside the prompt, and the timeout below has to outlast it.")
