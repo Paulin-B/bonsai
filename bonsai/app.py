@@ -35,6 +35,9 @@ from .turns import (
 from .chats import (
     delete_chat, fork_chat, load_chat, load_chat_index, new_chat, save_chat, title_chat, touch_chat,
 )
+from .shell import (
+    stop_all_background,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, SkillLearner, Worker,
 )
@@ -2347,6 +2350,11 @@ class Bonsai(QWidget):
         if self.observer_timer:
             self.observer_timer.stop()
         self.stop_monitor()
+        # A process started from here is ours to clean up. Leaving a game or a dev
+        # server running after the window is gone is not a background task, it is a leak
+        # nobody can see to stop.
+        for name in stop_all_background():
+            self.log(f"Stopped background process {name}.")
         self.stop_docker(blocking=True)
         event.accept()
 

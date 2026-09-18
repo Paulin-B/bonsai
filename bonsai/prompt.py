@@ -350,6 +350,9 @@ TOOL_TRIGGERS = {
 
     "search_images": ("image", "picture", "photo", "illustration", "diagram", "icon",
                       "artwork", "logo", "wallpaper"),
+    "bg": ("run the game", "start the server", "dev server", "watcher", "in the "
+           "background", "keep it running", "while it runs", "godot", "npm run",
+           "launch the game", "long-running", "playtest"),
     "download": ("download", "save the file", "grab the", "http://", "https://"),
     # 'usages' also loads whenever a file is being changed - see relevant_tools.
     "fetch": ("fetch", "web page", "webpage", "website", "article", "link",
@@ -434,6 +437,21 @@ def build_tool_schemas(only=None):
               "a script to check your own work.",
               {"command": {"type": "string", "description": "The command and its arguments."},
                "working_directory": path}, ["command", "working_directory"]),
+        _tool("bg", "Start a long-running program and leave it running, or check on one "
+              "you started. RUN waits for a command to finish, so it cannot start a game, "
+              "a server or a watcher. START gives the process a name; READ shows what it "
+              "has printed since; STOP ends it. A process keeps running between your "
+              "turns, so start it, do something else, then read its output.",
+              {"action": {"type": "string", "enum": ["START", "LIST", "READ", "STOP"]},
+               "command": {"type": "string",
+                           "description": "For START: the command and its arguments."},
+               "working_directory": path,
+               "name": {"type": "string",
+                        "description": "For READ and STOP: the name START gave back, "
+                                       "e.g. bg1."},
+               "lines": {"type": "integer",
+                         "description": "For READ: how many recent lines to show."}},
+              ["action"]),
         _tool("edit", "Change part of an existing file by replacing one exact passage "
               "of its text. Prefer this over file_op WRITE whenever the file already "
               "exists - it does not require reproducing the rest of the file.",
@@ -638,6 +656,16 @@ def native_call_to_tool(name, arguments):
                 return "TASK", "REMOVE " + " ".join(str(n) for n in several)
             return "TASK", f"REMOVE {get('number', '')}"
         return "TASK", action
+    if name == "bg":
+        action = str(get("action", "")).upper()
+        if action == "START":
+            return "BG", f"START {get('command', '')} | {get('working_directory', '')}"
+        if action == "READ":
+            lines = get("lines")
+            return "BG", f"READ {get('name', '')}" + (f" | {lines}" if lines else "")
+        if action in ("STOP", "LIST"):
+            return "BG", f"{action} {get('name', '')}".strip()
+        return "BG", action
     if name == "edit":
         return "FILE_OP", (f"EDIT | {get('path', '')} | {get('old_text', '')}"
                            f"{EDIT_SEP}{get('new_text', '')}")

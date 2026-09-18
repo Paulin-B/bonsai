@@ -1,10 +1,13 @@
 """Running commands, opening programs, and reaching the web."""
 
+import collections
+import itertools
 import os
 import re
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 import requests
@@ -73,10 +76,14 @@ def download_file(raw):
     return f"Downloaded {written} bytes to '{dest}'."
 
 
-def classify_command(raw):
+def classify_command(raw, background=False):
     """Returns (argv, working_dir, verdict) where verdict is 'allowed', 'ask' or an
     error string. Commands are never run through a shell, so pipes, redirects and
-    command substitution simply aren't available to the model."""
+    command substitution simply aren't available to the model.
+
+    `background` only relaxes the desktop-application refusal, which exists because RUN
+    waits for the command to finish. A process started in the background is not waited
+    on, so a game or a dev server is exactly what it is for."""
     parts = [p.strip() for p in raw.split("|", 1)]
     command = parts[0]
     workdir_raw = parts[1] if len(parts) > 1 else ""
@@ -95,7 +102,8 @@ def classify_command(raw):
     if program in FORBIDDEN_COMMANDS:
         return None, None, (f"[Refused: '{program}' is never allowed from here. Use the "
                             "FILE_OP and DOWNLOAD tools for file and network operations.]")
-    if program not in ALLOWED_COMMANDS and program in desktop_programs():
+    if (not background and program not in ALLOWED_COMMANDS
+            and program in desktop_programs()):
         return None, None, (f"[Refused: '{program}' is a desktop application. RUN waits for "
                             "the command to finish and hides the display from it, so this "
                             f"would hang until the timeout and then fail. Use LAUNCH: "
@@ -191,6 +199,163 @@ def execute_command(argv, workdir):
                    + ". If the command needed any of those, say so - the user can turn "
                      "the sandbox off in Settings.]")
     return f"exit code {completed.returncode} in {where}\n{output}"
+
+
+# Processes that outlive a turn: a game, a dev server, a watcher. RUN waits and returns
+# output, which cannot express "start this, let it run, and tell me what it printed".
+MAX_BACKGROUND = 4
+
+
+# Per process. Enough to see a stack trace scroll past, bounded so a process that spins
+# printing forever costs a fixed amount of memory rather than the machine.
+MAX_BACKGROUND_LINES = 2000
+
+
+_background = {}
+_background_lock = threading.Lock()
+_background_counter = itertools.count(1)
+
+
+class BackgroundProcess:
+    """One running command, with its recent output kept as it arrives.
+
+    Output is drained by a thread rather than read on demand because a pipe nobody
+    reads fills up and the process stops dead when it does - which would look like a
+    hung program and be nothing of the sort."""
+
+    def __init__(self, name, argv, workdir, popen, sandboxed):
+        self.name = name
+        self.argv = argv
+        self.workdir = workdir
+        self.popen = popen
+        self.sandboxed = sandboxed
+        self.started = time.time()
+        self.lines = collections.deque(maxlen=MAX_BACKGROUND_LINES)
+        self.dropped = 0
+        self.reader = threading.Thread(target=self._drain, daemon=True)
+        self.reader.start()
+
+    def _drain(self):
+        try:
+            for line in self.popen.stdout:
+                if len(self.lines) == self.lines.maxlen:
+                    self.dropped += 1
+                self.lines.append(line.rstrip("\n"))
+        except Exception:
+            pass                    # the process died mid-read; exit code tells the story
+
+    def alive(self):
+        return self.popen.poll() is None
+
+    def status(self):
+        code = self.popen.poll()
+        seconds = int(time.time() - self.started)
+        if code is None:
+            return f"running for {seconds}s"
+        return f"exited with code {code} after {seconds}s"
+
+    def stop(self, timeout=5):
+        if not self.alive():
+            return f"{self.name} had already {self.status()}."
+        self.popen.terminate()
+        try:
+            self.popen.wait(timeout=timeout)
+            return f"{self.name} stopped (exit code {self.popen.poll()})."
+        except subprocess.TimeoutExpired:
+            self.popen.kill()
+            self.popen.wait(timeout=timeout)
+            return f"{self.name} did not stop when asked and was killed."
+
+
+def start_background(argv, workdir):
+    """Run a command without waiting for it, and keep hold of it."""
+    config = settings()
+    with _background_lock:
+        # Only live ones count against the limit; a finished process stays listed so
+        # its output can still be read.
+        running = sum(1 for p in _background.values() if p.alive())
+        if running >= MAX_BACKGROUND:
+            return (f"[Refused: {running} background processes are already running, which "
+                    f"is the limit. BG: STOP one first, or BG: LIST to see them.]")
+    sandboxed = config.get("sandbox_commands", True) and sandbox_available()
+    launch = (sandbox_argv(argv, workdir, config.get("sandbox_network", False))
+              if sandboxed else argv)
+    try:
+        popen = subprocess.Popen(
+            launch, cwd=str(workdir), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True,
+            bufsize=1, shell=False, start_new_session=True,
+        )
+    except FileNotFoundError:
+        return f"[Command not found: {argv[0]}]"
+    except Exception as exc:
+        return f"[Could not start: {exc}]"
+
+    name = f"bg{next(_background_counter)}"
+    with _background_lock:
+        _background[name] = BackgroundProcess(name, argv, workdir, popen, sandboxed)
+    where = f"{workdir}{' (sandboxed)' if sandboxed else ' (NOT sandboxed)'}"
+    return (f"Started {name}: {' '.join(argv)}\nin {where}\n"
+            f"It is running now. Read what it prints with BG: READ {name}, and stop it "
+            f"with BG: STOP {name}. It keeps running between your turns.")
+
+
+def background_list():
+    with _background_lock:
+        processes = list(_background.values())
+    if not processes:
+        return "(no background processes)"
+    return "\n".join(
+        f"{p.name}: {' '.join(p.argv)} - {p.status()}, {len(p.lines)} line(s) of output"
+        for p in processes)
+
+
+def background_read(raw):
+    parts = [part.strip() for part in str(raw).split("|", 1)]
+    with _background_lock:
+        process = _background.get(parts[0])
+    if process is None:
+        return f"[No background process called '{parts[0]}'. BG: LIST shows them.]"
+    try:
+        wanted = int(parts[1]) if len(parts) > 1 and parts[1] else 120
+    except ValueError:
+        return f"[Couldn't read '{parts[1]}' as a number of lines.]"
+    lines = list(process.lines)[-max(1, wanted):]
+    head = f"{process.name}: {' '.join(process.argv)} - {process.status()}"
+    if not lines:
+        return f"{head}\n(no output yet)"
+    missing = ""
+    if process.dropped:
+        missing = (f"\n[{process.dropped} earlier line(s) scrolled out of the buffer - "
+                   "only the most recent are kept.]")
+    return f"{head}{missing}\n" + "\n".join(lines)
+
+
+def background_stop(raw):
+    name = str(raw).strip()
+    with _background_lock:
+        process = _background.get(name)
+    if process is None:
+        return f"[No background process called '{name}'. BG: LIST shows them.]"
+    return process.stop()
+
+
+def stop_all_background():
+    """Called when the window closes. A process started from here is ours to clean up -
+    leaving a game or a server running after the app is gone is not a background task,
+    it is a leak."""
+    with _background_lock:
+        processes = list(_background.values())
+        _background.clear()
+    stopped = []
+    for process in processes:
+        if process.alive():
+            try:
+                process.stop(timeout=3)
+                stopped.append(process.name)
+            except Exception:
+                pass
+    return stopped
 
 
 LAUNCH_SETTLE = 1.5

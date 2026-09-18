@@ -26,7 +26,7 @@ from .codeintel import (
     FILE_OPS, describe_references,
 )
 from .shell import (
-    classify_command, classify_launch, download_file, execute_command, make_pdf, start_program,
+    background_list, background_read, background_stop, classify_command, classify_launch, download_file, execute_command, make_pdf, start_background, start_program,
 )
 from .media import (
     LOOK_ALIASES, capture_screen, look_at, make_chart,
@@ -304,6 +304,35 @@ class Worker(QThread):
         self.status.emit(f"Running: {' '.join(argv)[:50]}")
         return execute_command(argv, workdir)
 
+    def run_background(self, raw):
+        """BG: START <command> | <folder>, LIST, READ <name> [| lines], STOP <name>.
+
+        Permission is asked the same way RUN asks, and for the same reason - except that
+        a background process outlives the turn, so the question says so."""
+        action, _, rest = str(raw).strip().partition(" ")
+        action, rest = action.upper(), rest.strip()
+        if action == "LIST":
+            return background_list()
+        if action == "READ":
+            return background_read(rest)
+        if action == "STOP":
+            return background_stop(rest)
+        if action != "START":
+            return ("[BG needs START, LIST, READ or STOP. For example: "
+                    "BG: START godot --headless --path . | /path/to/project]")
+        argv, workdir, verdict = classify_command(rest, background=True)
+        if argv is None:
+            return verdict
+        if verdict == "ask":
+            description = (f"Start a program and leave it running:\n  {' '.join(argv)}\n\n"
+                           f"In folder:\n  {workdir}\n\nIt will keep running after this "
+                           "turn ends, until it is stopped or Bonsai closes.")
+            self.status.emit("Waiting for permission...")
+            if not self.ask_permission(description):
+                return "[The user did not grant permission to start this process.]"
+        self.status.emit(f"Starting: {' '.join(argv)[:50]}")
+        return start_background(argv, workdir)
+
     def show_preview(self, raw):
         """Put a file in the side panel for the user to see. Deliberately not the same
         as LOOK: this shows THEM something, LOOK is how the model sees it itself."""
@@ -404,6 +433,8 @@ class Worker(QThread):
             return download_file(argument)
         if name == "RUN":
             return self.run_command(argument)
+        if name == "BG":
+            return self.run_background(argument)
         if name == "TASK":
             return handle_task(argument)
         if name == "FILE_OP":
