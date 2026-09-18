@@ -24,7 +24,7 @@ from .store import (
     available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
 )
 from .text import (
-    ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, TASK_MUTATION_RE, invented_recall, plain_text, unsearched_memory, unverified_files,
+    ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, RECORD_HEADER, TASK_MUTATION_RE, invented_recall, is_record_echo, narrate_trace, plain_text, unsearched_memory, unverified_files,
 )
 from .files import (
     read_file,
@@ -1778,6 +1778,18 @@ class Bonsai(QWidget):
     def on_reply(self, reply, trace, hit_step_limit=False, unfinished=""):
         self.end_stream()
         self.clear_busy()
+        if is_record_echo(reply):
+            # It wrote a transcript of work instead of doing the work: hundreds of
+            # duplicated "ran X and got" lines, no tool calls at all, running to the
+            # token limit mid-line. Showing it would be showing a fabrication, and
+            # storing it would feed the next turn the thing it is copying.
+            self.log("\u26a0 It replied with a copy of the turn record instead of doing "
+                     "anything, so nothing happened this turn. The reply was discarded "
+                     "rather than shown.", "orange")
+            self.stop_auto("it copied the turn record back instead of working")
+            reply = ("(Discarded: this turn produced a copy of the turn record rather "
+                     "than any work, and no tool ran.)")
+            trace, unfinished, hit_step_limit = "", "", False
         self.messages.add_assistant(reply)
         if unfinished:
             # The strongest signal available: the app itself refused or failed the
@@ -1816,22 +1828,22 @@ class Bonsai(QWidget):
             return
 
         first = not self.history
-        stored = reply
+        self.history += [{"role": "user", "content": self.sent_prompt},
+                         {"role": "assistant", "content": reply}]
         if trace:
-            # Rewritten into prose: storing it in "NAME: arg -> result" form gave the
-            # model a tool-call-shaped template it copied back verbatim.
-            narrated = "\n".join(
-                f"- ran {line.split(':', 1)[0]} and got: {line.split(' -> ', 1)[-1]}"
-                for line in trace.splitlines() if line.strip())
             # The next turn has to inherit the failures too, or it carries on from a
             # summary that treats them as done.
             failures = (f"\nThese were attempted and did NOT succeed:\n{unfinished}"
                         if unfinished else "")
-            stored = (f"[SYSTEM RECORD - what the app actually did this turn:\n{narrated}"
-                      f"{failures}\nAnything not listed as succeeding here did NOT "
-                      f"happen.]\n\n{reply}")
-        self.history += [{"role": "user", "content": self.sent_prompt},
-                         {"role": "assistant", "content": stored}]
+            # Deliberately NOT part of the assistant's own message. It used to be, and a
+            # model reading its own last turn saw that an assistant turn looks like a
+            # record - so it started writing records instead of doing the work they were
+            # meant to keep honest. Arriving from outside its voice, it is a report about
+            # the turn rather than an example of how to answer.
+            self.history.append(
+                {"role": "user",
+                 "content": f"{RECORD_HEADER}\n{narrate_trace(trace)}{failures}\n"
+                            "Anything not listed as succeeding here did NOT happen.]"})
         self.history = self.history[-self.settings.get("max_history_messages", 20):]
         save_chat(self.chat_id, self.history)
         if first:

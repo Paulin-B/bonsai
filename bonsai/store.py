@@ -882,12 +882,24 @@ def record_project_file(path):
 
 def active_project():
     """The project being worked in: the trusted folder whose ledger was touched most
-    recently, falling back to the first trusted folder."""
+    recently, falling back to the first trusted folder.
+
+    A folder with nothing recorded in it loses to one that has files or notes, however
+    recently it was touched. Only writes add to a ledger, so reading documents in
+    another trusted folder stamped its timestamp while recording nothing - and that
+    empty folder then outranked the project actually being worked on. The prompt went
+    on to describe a folder containing no files, and the real project's ledger, which
+    named the exact source file the work was about, was never mentioned at all. The
+    model then hunted for that file in the only place the prompt pointed at."""
     roots = trusted_roots()
     if not roots:
         return None
     projects = load_projects()["projects"]
-    return max(roots, key=lambda root: projects.get(root, {}).get("updated", ""))
+    def rank(root):
+        entry = projects.get(root, {})
+        return (bool(entry.get("files") or entry.get("notes")),
+                entry.get("updated", ""))
+    return max(roots, key=rank)
 
 
 def record_project_note(note):

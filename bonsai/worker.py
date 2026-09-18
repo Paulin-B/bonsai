@@ -2,6 +2,7 @@
 
 import json
 import re
+import traceback
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -39,6 +40,16 @@ from .chats import (
 from .prompt import (
     build_system_prompt, build_tool_schemas, native_call_to_tool, relevant_tools,
 )
+
+
+def debug_note(tag, text):
+    """Append one entry to the debug log. Never raises: logging must not break a turn."""
+    try:
+        DEBUG_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(DEBUG_LOG_FILE, "a") as f:
+            f.write(f"\n=== {datetime.now().isoformat()} {tag} ===\n{text}\n")
+    except Exception:
+        pass
 
 
 class Worker(QThread):
@@ -233,14 +244,7 @@ class Worker(QThread):
                     arguments = {}
             native = native_call_to_tool(function.get("name"), arguments or {})
             break
-        try:
-            DEBUG_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(DEBUG_LOG_FILE, "a") as f:
-                tag = "NATIVE" if native else "RAW"
-                f.write(f"\n=== {datetime.now().isoformat()} {tag} ===\n"
-                        f"{native if native else raw!r}\n")
-        except Exception:
-            pass  # logging must never break a request
+        debug_note("NATIVE" if native else "RAW", f"{native if native else raw!r}")
         return raw, native
 
     # -- tools --
@@ -753,6 +757,10 @@ class Worker(QThread):
             self.failed.emit(unreachable_server(
                 self.config.get("server_url", DEFAULTS["server_url"])))
         except Exception as exc:
+            # The message alone says "Error: list index out of range" and nothing about
+            # where. 882KB of debug log held no traceback at all, so every crash in here
+            # was invisible after the fact.
+            debug_note("CRASH", traceback.format_exc())
             self.failed.emit(f"Error: {exc}")
 
 

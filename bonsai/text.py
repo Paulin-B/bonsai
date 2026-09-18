@@ -90,8 +90,13 @@ EVOLVE_RE = re.compile(
     r"^[ \t>*\-\[]*EVOLVE:\s*(TRAIT|OPINION|JOKE):\s*(\S.*?)\]?\s*$", re.I | re.M)
 
 
+# The record is stored with this exact opening, so both the app that writes it and the
+# strippers that recognise it copied back agree on one spelling.
+RECORD_HEADER = "[SYSTEM RECORD - what the app actually did this turn:"
+
+
 ACTIONS_ECHO_RE = re.compile(
-    r"(\(Actions I performed this turn:.*?\)|\[SYSTEM RECORD.*?\]"
+    r"(\(Actions I performed this turn:.*?(?:\)|\Z)|\[SYSTEM RECORD.*?(?:\]|\Z)"
     r"|^.*?Anything not listed here did NOT happen\.\])\s*", re.S | re.I)
 
 
@@ -131,7 +136,51 @@ MAX_CONSECUTIVE_REFUSALS = 5
 
 # The turn record is stored as "- ran TOOL and got: ..." lines, and a looping model
 # copies that shape back out as if it were its own prose.
-RECORD_ECHO_RE = re.compile(r"^[ \t>*\-]*ran\s+[A-Z_]{3,12}\s+and got:.*$", re.M | re.I)
+RECORD_ECHO_RE = re.compile(
+    r"^[ \t>*\-]*ran\s+[A-Z_]{3,12}\s+(?:\d+\s+times[^:]*|and got):.*$", re.M | re.I)
+
+
+def narrate_trace(trace):
+    """The turn's tool calls as prose, with repeated calls collapsed to one line.
+
+    Two separate lessons are baked in here. Storing the calls as "NAME: arg -> result"
+    gave the model a tool-call-shaped template it copied back out as if it were its own;
+    prose does not read as a template. And collapsing repeats matters just as much: a
+    turn that called the same thing over and over produced one identical line per call,
+    which is a page of text carrying a single fact, and a model that then echoes its own
+    record has a page to multiply rather than a line."""
+    counts, order = {}, []
+    for line in (trace or "").splitlines():
+        if not line.strip():
+            continue
+        pair = (line.split(":", 1)[0], line.split(" -> ", 1)[-1])
+        if pair not in counts:
+            counts[pair] = 0
+            order.append(pair)
+        counts[pair] += 1
+    out = []
+    for name, got in order:
+        times = counts[(name, got)]
+        out.append(f"- ran {name} and got: {got}" if times == 1 else
+                   f"- ran {name} {times} times, getting the same answer every time: {got}")
+    return "\n".join(out)
+
+
+def is_record_echo(reply):
+    """Whether a reply is the turn record copied back instead of a reply.
+
+    The record exists to stop the model claiming work it did not do. Putting it in the
+    assistant's own turn taught it that an assistant turn looks like a record, so it
+    started producing one in place of working - hundreds of duplicated "ran X and got"
+    lines and no tool calls at all, running to the token limit mid-line. A reply that is
+    only the record is not a short reply, it is a turn that did nothing."""
+    text = reply or ""
+    if not RECORD_ECHO_RE.search(text):
+        return False
+    left = RECORD_ECHO_RE.sub("", ACTIONS_ECHO_RE.sub("", text))
+    left = left.replace(RECORD_HEADER, "")
+    left = re.sub(r"Anything not listed[^\n]*", "", left)
+    return len(left.strip(" \t\r\n-*>[]")) < 40
 
 
 # render_results feeds this turn's results to the model as
