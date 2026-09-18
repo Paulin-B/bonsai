@@ -89,6 +89,18 @@ out = ga.handle_stage(f"START python3 loop.py | {work}")
 check("a program that exits at once is reported, not counted as running",
       "exited immediately" in out, True)
 check("leaving no stage open", ga.handle_stage("STATUS"), "(no stage is open)")
+
+# A test run, a build or a headless check is MEANT to end. Reporting that as a failure
+# to launch called a successful run a crash.
+class _Finished(_Dead):
+    def poll(self): return 0
+ga.stage.subprocess.Popen = lambda *a, **k: _Finished()
+out = ga.handle_stage(f"START python3 loop.py | {work}")
+check("a clean exit reads as a finished run, not a crash",
+      "finished (exit code 0)" in out, True)
+check("and the stage stays open so its output can still be read",
+      "no stage" in ga.handle_stage("STATUS"), False)
+ga.handle_stage("STOP")
 ga.stage.subprocess.Popen = real_popen
 
 print("\n-- the refusals a command gets anywhere else still apply --")

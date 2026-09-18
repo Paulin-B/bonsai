@@ -205,12 +205,19 @@ def start_stage(raw, visible=True, size="1280x720"):
             parked = park_window(shown.get("address"), STAGE_WORKSPACE)
     handed_back = restore_focus(was_focused)
     if not stage.program_alive():
-        printed = trim_output(stage.log.read_text(errors="replace").strip(), 900)
+        printed = trim_output(stage.log.read_text(errors="replace").strip(), 2000)
         code = stage.program.poll()
-        stage.stop()
-        _stage = None
-        return (f"[The program exited immediately with code {code}, so there is nothing "
-                "on the stage.]" + (f"\n{printed}" if printed else ""))
+        if code != 0:
+            stage.stop()
+            _stage = None
+            return (f"[The program exited immediately with code {code}, so there is "
+                    "nothing on the stage.]" + (f"\n{printed}" if printed else ""))
+        # Exit 0 is not a failure to launch: something that runs and finishes - a test
+        # run, a build, a headless check - is meant to end. The stage is left open so
+        # its output can still be read, rather than reporting the success as a crash.
+        return (f"Ran {' '.join(argv)} on {display} and it finished (exit code 0).\n"
+                + (f"{printed}\n" if printed else "It printed nothing.\n")
+                + "The stage is still open - STAGE: STOP when you are done with it.")
     seen = stage_windows()
     return (f"Stage open on {display}"
             + (" (a window you can watch)" if visible else " (nothing to see)")
