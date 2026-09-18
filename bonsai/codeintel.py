@@ -1,6 +1,6 @@
 """Does it parse, and what else would this change break?"""
 
-from .text import RESULT_ECHO_HEADER_RE
+from .text import REDACTED, RESULT_ECHO_HEADER_RE
 
 import ast
 import json
@@ -729,6 +729,14 @@ def do_write(raw, content):
         # empty file - and it leaves a 0-byte file that looks like finished work.
         return ("[Refused: no content to write. Send the file's actual contents with "
                 "the call; an empty file is not work.]")
+    if REDACTED in (content or ""):
+        # Redaction is only safe if it cannot be written back. Reading a config hands
+        # the model a placeholder where each secret was; writing that text out again
+        # would replace real credentials with the placeholder and lose them for good.
+        return ("[Refused: that content still carries " + REDACTED + ", which stands "
+                "where a secret was blanked out when you read the file. Writing it "
+                "would destroy the real values. NOTHING was written - edit the lines "
+                "you mean to change with EDIT instead of rewriting the whole file.]")
     broken = mangled_payload(content)
     if broken:
         # Refused rather than written-with-a-warning: the file on disk is still right,

@@ -15,6 +15,9 @@ from .config import (
 from .store import (
     load_trusted, settings,
 )
+from .text import (
+    REDACTED, redact_secrets,
+)
 
 
 def is_sensitive(path):
@@ -234,13 +237,23 @@ def read_file(raw, numbered=True):
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception as exc:
         return f"[Read failed: {exc}]"
+    # Credential stores are refused by path already; this is the password sitting in an
+    # ordinary file inside a folder you trust. It is blanked before the model sees it,
+    # because from the model it goes to the server, and the server is not always the
+    # one on this machine.
+    text, secrets = redact_secrets(text)
+    note = ("" if not secrets else
+            f"\n[{secrets} secret value(s) replaced with {REDACTED} before you were "
+            "shown this file. The real values are on disk and unchanged. Do NOT write "
+            "this text back to the file - that would overwrite them.]")
 
     if not numbered:
         # Attached files are raw content the model may be asked to write back out, so
         # they must not carry line numbers into the file.
         if len(text) <= limit:
-            return text
-        return f"{text[:limit]}\n...[truncated: {limit} of {len(text)} characters shown]"
+            return text + note
+        return (f"{text[:limit]}\n...[truncated: {limit} of {len(text)} characters "
+                f"shown]{note}")
 
     lines = text.splitlines()
     total = len(lines)
@@ -278,7 +291,7 @@ def read_file(raw, numbered=True):
         out.append(f"...[{total - last} more lines. Read them with "
                    f"READ_FILE: {path} | {last + 1}-{following}]")
     out.append("(Line numbers are for reference only - never copy them into an EDIT.)")
-    return "\n".join(out)
+    return "\n".join(out) + note
 
 
 def list_directory(raw, limit=200):

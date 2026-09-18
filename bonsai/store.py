@@ -1,6 +1,7 @@
 """Everything Bonsai remembers: settings, memory, skills, notes, the vault."""
 
 import json
+import os
 import re
 import time
 import unicodedata
@@ -27,9 +28,37 @@ def load_json(path, default):
 
 
 def save_json(path, data):
+    """Write JSON so that an interrupted write cannot destroy what was already there.
+
+    Opening a file for writing truncates it immediately, so a crash, a kill, a full
+    disk or a serialisation error between that moment and the last byte leaves nothing
+    behind. Everything the app owns is saved through here - settings, memory, tasks,
+    chats, the project ledger - which makes that window matter far more than its width
+    suggests. The new bytes go to a temporary file beside the target, are forced to
+    disk, and only then replace it, so a reader sees either the old file or the new one.
+
+    The temporary is named so it cannot be mistaken for content: the chat list globs
+    for "*.json" and must not find a half-written one."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    temporary = path.with_name(f".{path.name}.saving-{os.getpid()}")
+    try:
+        with open(temporary, "w") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())    # a rename is only atomic if the bytes are on disk
+        os.replace(temporary, path)
+    except OSError:
+        # Never worse than it used to be: if the swap cannot happen (a locked file on
+        # Windows, say) fall back to the write this replaced, which is what would have
+        # run anyway. Callers do not guard save_json, so raising here would take out
+        # whatever was in the middle of saving.
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    finally:
+        try:
+            temporary.unlink()      # only still there if the replace never happened
+        except OSError:
+            pass
 
 
 def settings():

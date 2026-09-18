@@ -140,6 +140,88 @@ RECORD_ECHO_RE = re.compile(
     r"^[ \t>*\-]*ran\s+[A-Z_]{3,12}\s+(?:\d+\s+times[^:]*|and got):.*$", re.M | re.I)
 
 
+REDACTED = "[REDACTED-BY-BONSAI]"
+
+
+# Key names whose value is a credential. Matched as a whole word or a suffix, so
+# "db_password" and "PASSWORD" both hit while "password_hint" and "token_count" - a
+# count, not a token - do not.
+SECRET_KEY_RE = re.compile(
+    r"(?<![A-Za-z0-9])"
+    r"(?:[A-Za-z0-9_.-]*?_)?"
+    r"(?:passwd|password|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|"
+    r"client[_-]?secret|credentials?|auth[_-]?token|session[_-]?key|bearer)"
+    r"(?![A-Za-z0-9_])", re.I)
+
+
+# "KEY = value", "KEY: value", "KEY=value" - the assignment forms an .env, a .tf, a
+# YAML or a TOML file all use.
+ASSIGNMENT_RE = re.compile(
+    r"^(?P<lead>[ \t\-]*\"?)(?P<key>[A-Za-z0-9_.\[\]-]+)(?P<mid>\"?[ \t]*[:=][ \t]*)"
+    r"(?P<value>.+?)(?P<trail>[ \t]*,?[ \t]*)$", re.M)
+
+
+# A value that carries no secret however it is named.
+HARMLESS_VALUE_RE = re.compile(
+    r"^(?:\"\"|\'\'|''|true|false|null|none|nil|\d+(?:\.\d+)?|"
+    r"[\"\']?(?:x{3,}|\*{3,}|<[^>]*>|\$\{[^}]*\}|\$[A-Z_]+|changeme|your[-_].*|"
+    r"todo|tbd|replace[-_]?me|placeholder)[\"\']?)$", re.I)
+
+
+PEM_RE = re.compile(r"(-----BEGIN [A-Z ]*PRIVATE KEY-----)(.*?)(-----END [A-Z ]*PRIVATE KEY-----)",
+                    re.S)
+
+
+# Credentials inside a connection string: scheme://user:password@host
+URL_CREDENTIAL_RE = re.compile(r"(\b[a-z][a-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)(@)", re.I)
+
+
+# Token shapes that are unmistakable whatever they are called or wherever they appear.
+TOKEN_SHAPE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{30,})")
+
+
+def redact_secrets(text):
+    """Blank out credentials in file content before the model ever sees them.
+
+    Reading a file is how a password in a .env, a .tf or a config reaches the model,
+    and from there the server - which is not always the one on this machine, since an
+    endpoint can be a remote API. Paths that are obviously credential stores are already
+    refused; this is for the secret sitting in an ordinary file in a folder you trust.
+
+    The key is always kept and only the value is replaced, so the model can still see
+    that the setting exists and reason about it. Returns the text and how many values
+    went, because a redaction nobody is told about is its own kind of lie."""
+    if not text:
+        return text, 0
+    count = 0
+
+    def blank(match):
+        nonlocal count
+        count += 1
+        return REDACTED
+
+    text, n = PEM_RE.subn(lambda m: m.group(1) + "\n" + REDACTED + "\n" + m.group(3), text)
+    count += n
+    text, n = URL_CREDENTIAL_RE.subn(lambda m: m.group(1) + REDACTED + m.group(3), text)
+    count += n
+    text, n = TOKEN_SHAPE_RE.subn(blank, text)
+
+    def assignment(match):
+        nonlocal count
+        value = match.group("value").strip()
+        if not SECRET_KEY_RE.search(match.group("key")):
+            return match.group(0)
+        if not value or HARMLESS_VALUE_RE.match(value) or REDACTED in value:
+            return match.group(0)
+        count += 1
+        return (match.group("lead") + match.group("key") + match.group("mid")
+                + REDACTED + match.group("trail"))
+
+    return ASSIGNMENT_RE.sub(assignment, text), count
+
+
 def strip_record_echo(reply):
     """Remove stray record lines from a reply - but hand back a reply that is ONLY the
     record untouched.
