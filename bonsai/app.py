@@ -38,6 +38,9 @@ from .chats import (
 from .shell import (
     stop_all_background,
 )
+from .stage import (
+    stop_stage,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, SkillLearner, Worker,
 )
@@ -2355,6 +2358,9 @@ class Bonsai(QWidget):
         # nobody can see to stop.
         for name in stop_all_background():
             self.log(f"Stopped background process {name}.")
+        closed = stop_stage()
+        if closed:
+            self.log(f"Closed the stage on {closed}.")
         self.stop_docker(blocking=True)
         event.accept()
 

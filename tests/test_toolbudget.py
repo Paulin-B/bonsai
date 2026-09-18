@@ -59,16 +59,19 @@ check("phrases still match", ga._mentions("what did you tell me last time", "las
 
 print("\n-- the saving, measured --")
 full = tokens()
-# The ceiling moves only when a tool is genuinely added - it went up for bg and play,
-# both of which load on a trigger rather than always, which is why the typical request
-# below did not move at all.
-check("all schemas are the number I claimed", 2500 < full < 3500, True)
+# This total is the worst case and never actually goes out, so it rises whenever a tool
+# is added - bg, play and stage each moved it. The number worth guarding is the one
+# below: what a real request costs, which has not moved at all while three tools were
+# added, because each of them loads on a trigger rather than always.
+check("all schemas are the number I claimed", 2500 < full < 4000, True)
 sizes = [tokens(ga.relevant_tools(p)) for p in (
     "fix the shader", "make a chart of my disk usage", "what gpu do I have",
     "write a pdf report with a chart", "rename this function everywhere")]
 average = sum(sizes) // len(sizes)
 print(f"     all tools ~{full} tokens; typical request ~{average}")
 check("a typical request costs meaningfully less", average < full * 0.80, True)
+check("and costs little in absolute terms, whatever the tool count grows to",
+      average < 2300, True)
 check("even the heaviest request saves something", max(sizes) < full, True)
 
 print("\n-- a dormant tool is named, so it never becomes invisible --")

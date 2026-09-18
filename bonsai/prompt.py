@@ -350,6 +350,9 @@ TOOL_TRIGGERS = {
 
     "search_images": ("image", "picture", "photo", "illustration", "diagram", "icon",
                       "artwork", "logo", "wallpaper"),
+    "stage": ("play the game", "test the game", "run the game", "try it out",
+              "while I work", "in the background", "playtest", "does it work",
+              "see if it works", "godot", "launch the game", "on its own"),
     "play": ("play the game", "test the game", "try it out", "press", "click",
              "keyboard", "playtest", "does it work", "see if it works", "walk",
              "jump", "controls", "input"),
@@ -455,10 +458,26 @@ def build_tool_schemas(only=None):
                "lines": {"type": "integer",
                          "description": "For READ: how many recent lines to show."}},
               ["action"]),
-        _tool("play", "Try a program out instead of only looking at it. FOCUS its "
-              "window, then KEY a key or combination, HOLD one down (how you walk in a "
-              "game), TYPE text, POINT the mouse inside the window and CLICK. LOOK "
-              "afterwards to see what happened. Reaches only windows Bonsai opened.",
+        _tool("stage", "Run a program on a display of its own and drive it there, "
+              "leaving the desktop alone so it can be tested while the user works. "
+              "START runs it, LOOK shows what is on the stage, KEY/HOLD/TYPE/MOVE/CLICK "
+              "drive it, OUTPUT is what it printed, STOP closes it. Prefer this to play.",
+              {"action": {"type": "string",
+                          "enum": ["START", "LOOK", "KEY", "HOLD", "TYPE", "MOVE",
+                                   "CLICK", "WINDOWS", "OUTPUT", "STATUS", "STOP"]},
+               "command": {"type": "string",
+                           "description": "For START: the program to run on the stage."},
+               "working_directory": path,
+               "keys": {"type": "string", "description": "KEY/HOLD: 'space', 'Right'."},
+               "milliseconds": {"type": "integer", "description": "HOLD: how long."},
+               "text": {"type": "string", "description": "TYPE: the text."},
+               "button": {"type": "string", "enum": ["left", "right", "middle"]},
+               "x": {"type": "integer", "description": "MOVE/CLICK: x on the stage."},
+               "y": {"type": "integer", "description": "MOVE/CLICK: y on the stage."}},
+              ["action"]),
+        _tool("play", "Drive a window on the real desktop: FOCUS it, then KEY, HOLD, "
+              "TYPE, POINT and CLICK; LOOK to see the result. Takes the machine over "
+              "while it runs, so use stage instead unless the real desktop is the point.",
               {"action": {"type": "string",
                           "enum": ["KEY", "HOLD", "TYPE", "POINT", "CLICK", "MOVE",
                                    "FOCUS", "WINDOWS"]},
@@ -682,6 +701,24 @@ def native_call_to_tool(name, arguments):
                 return "TASK", "REMOVE " + " ".join(str(n) for n in several)
             return "TASK", f"REMOVE {get('number', '')}"
         return "TASK", action
+    if name == "stage":
+        action = str(get("action", "")).upper()
+        if action == "START":
+            where = get("working_directory", "")
+            return "STAGE", f"START {get('command', '')}" + (f" | {where}" if where else "")
+        if action == "KEY":
+            return "STAGE", f"KEY {get('keys', '')}"
+        if action == "HOLD":
+            return "STAGE", f"HOLD {get('keys', '')} {get('milliseconds', 500)}"
+        if action == "TYPE":
+            return "STAGE", f"TYPE {get('text', '')}"
+        if action == "MOVE":
+            return "STAGE", f"MOVE {get('x', 0)} {get('y', 0)}"
+        if action == "CLICK":
+            spot = (f" {get('x')} {get('y')}"
+                    if get("x") is not None and get("y") is not None else "")
+            return "STAGE", f"CLICK {get('button', 'left')}{spot}"
+        return "STAGE", action
     if name == "play":
         action = str(get("action", "")).upper()
         if action == "KEY":

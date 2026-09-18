@@ -28,6 +28,9 @@ from .codeintel import (
 from .shell import (
     _approved_windows, approve_window, background_list, background_read, background_stop, classify_command, classify_launch, download_file, execute_command, focused_window, handle_play, make_pdf, pid_is_ours, start_background, start_program,
 )
+from .stage import (
+    handle_stage, stage_look,
+)
 from .media import (
     LOOK_ALIASES, capture_screen, look_at, make_chart,
 )
@@ -459,6 +462,15 @@ class Worker(QThread):
             return self.run_background(argument)
         if name == "PLAY":
             return self.run_play(argument)
+        if name == "STAGE":
+            action = str(argument).strip().split(" ", 1)[0].upper()
+            self.status.emit(f"Stage: {str(argument)[:40]}")
+            if action == "LOOK":
+                note, picture = stage_look()
+                if picture:
+                    self.fresh_frame = picture
+                return note
+            return handle_stage(argument)
         if name == "TASK":
             return handle_task(argument)
         if name == "FILE_OP":
