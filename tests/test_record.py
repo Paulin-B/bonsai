@@ -63,6 +63,22 @@ for label, text in [
 ]:
     check(f"{label} is not an echo", ga.is_record_echo(text), False)
 
+print("\n-- the worker must not quietly tidy an empty turn away --")
+# This is the seam the first version of the fix fell through. The worker strips stray
+# record lines before the window ever sees the reply, so once the stripper was taught to
+# handle an unterminated record it removed the whole thing and the window received an
+# empty string - and a check for "is this reply only the record?" could never fire.
+check("a reply that is only the record survives the strip intact",
+      ga.strip_record_echo(UNTERMINATED), UNTERMINATED)
+check("so the window can still recognise it",
+      ga.is_record_echo(ga.strip_record_echo(UNTERMINATED)), True)
+check("a stray record line inside a real reply is still removed",
+      ga.strip_record_echo("- ran READ_FILE and got: ok\n\nThe hunger bar is missing, "
+                           "so I am adding it to MotherMachine now."),
+      "The hunger bar is missing, so I am adding it to MotherMachine now.")
+check("and an ordinary reply is untouched",
+      ga.strip_record_echo("Added the hunger bar."), "Added the hunger bar.")
+
 print("\n-- in the window --")
 ga.Bonsai.start_docker = lambda self: None
 app = ga.QApplication(sys.argv)

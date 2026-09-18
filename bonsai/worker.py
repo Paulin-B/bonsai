@@ -17,7 +17,7 @@ from .store import (
     all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, unreachable_server,
 )
 from .text import (
-    ACTIONS_ECHO_RE, DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, RECORD_ECHO_RE, awaits_an_answer, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -704,8 +704,11 @@ class Worker(QThread):
                 if spoken.strip():
                     reply = spoken       # keep the steady reply if this one comes back empty
 
-            reply = ACTIONS_ECHO_RE.sub("", reply).strip()
-            reply = RECORD_ECHO_RE.sub("", reply).strip()
+            # Tidying away stray record lines is right; quietly tidying away a reply
+            # that is ONLY the record is not. That turn did nothing, and stripping it
+            # here left a stub that looked like a terse answer, so the window never
+            # learned the turn was empty and auto mode carried on to the next round.
+            reply = strip_record_echo(reply)
             reply, invented, echoed = strip_result_echoes(reply, "\n".join(trace))
             if invented:
                 reply += ("\n\n\u26a0 Removed " + str(len(invented)) + " block(s) written "

@@ -140,6 +140,18 @@ RECORD_ECHO_RE = re.compile(
     r"^[ \t>*\-]*ran\s+[A-Z_]{3,12}\s+(?:\d+\s+times[^:]*|and got):.*$", re.M | re.I)
 
 
+def strip_record_echo(reply):
+    """Remove stray record lines from a reply - but hand back a reply that is ONLY the
+    record untouched.
+
+    Tidying away the odd copied line is right. Tidying away a whole turn is not: the
+    strip left a stub that read like a terse answer, so nothing downstream could tell
+    that the turn had done nothing at all, and auto mode moved on to the next round."""
+    if is_record_echo(reply):
+        return reply
+    return RECORD_ECHO_RE.sub("", ACTIONS_ECHO_RE.sub("", reply).strip()).strip()
+
+
 def narrate_trace(trace):
     """The turn's tool calls as prose, with repeated calls collapsed to one line.
 
