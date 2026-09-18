@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-18-background"
+APP_VERSION = "2026-09-18-play"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -194,6 +194,9 @@ DEFAULTS = {
     # Run commands inside bubblewrap: everything read-only except the working folder,
     # credentials masked, no network. Lets it check its own work without the check
     # being able to change anything else.
+    # How far PLAY's keys and clicks may reach: "own" (only windows Bonsai opened),
+    # "approved" (any window you say yes to), "any" (no check at all).
+    "play_scope": "own",
     "sandbox_commands": True,
     "sandbox_network": False,
     # Choosing a tool wants a steady hand; talking to you does not. At 1.5 the model

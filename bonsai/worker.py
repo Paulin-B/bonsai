@@ -26,7 +26,7 @@ from .codeintel import (
     FILE_OPS, describe_references,
 )
 from .shell import (
-    background_list, background_read, background_stop, classify_command, classify_launch, download_file, execute_command, make_pdf, start_background, start_program,
+    _approved_windows, approve_window, background_list, background_read, background_stop, classify_command, classify_launch, download_file, execute_command, focused_window, handle_play, make_pdf, pid_is_ours, start_background, start_program,
 )
 from .media import (
     LOOK_ALIASES, capture_screen, look_at, make_chart,
@@ -304,6 +304,28 @@ class Worker(QThread):
         self.status.emit(f"Running: {' '.join(argv)[:50]}")
         return execute_command(argv, workdir)
 
+    def run_play(self, raw):
+        """Send input to a program, within whatever reach the user has allowed.
+
+        Under "approved" the question is asked once per window rather than once per
+        keystroke - a prompt for every key would make testing a game impossible, which
+        is a good way to get the setting turned off entirely."""
+        scope = self.config.get("play_scope", DEFAULTS["play_scope"])
+        if scope == "approved":
+            window = focused_window()
+            if (window and not pid_is_ours(window.get("pid"))
+                    and window.get("address") not in _approved_windows):
+                self.status.emit("Waiting for permission...")
+                allowed = self.ask_permission(
+                    f"Send keys and clicks to a window Bonsai did not open:\n  "
+                    f"{window.get('class') or '?'} - {window.get('title') or 'untitled'}"
+                    "\n\nIt can type and click there for the rest of this session.")
+                if not allowed:
+                    return "[The user did not approve sending input to that window.]"
+                approve_window(window.get("address"))
+        self.status.emit(f"Playing: {str(raw)[:40]}")
+        return handle_play(raw, scope)
+
     def run_background(self, raw):
         """BG: START <command> | <folder>, LIST, READ <name> [| lines], STOP <name>.
 
@@ -435,6 +457,8 @@ class Worker(QThread):
             return self.run_command(argument)
         if name == "BG":
             return self.run_background(argument)
+        if name == "PLAY":
+            return self.run_play(argument)
         if name == "TASK":
             return handle_task(argument)
         if name == "FILE_OP":

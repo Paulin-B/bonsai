@@ -59,7 +59,10 @@ check("phrases still match", ga._mentions("what did you tell me last time", "las
 
 print("\n-- the saving, measured --")
 full = tokens()
-check("all schemas are the number I claimed", 2500 < full < 3300, True)
+# The ceiling moves only when a tool is genuinely added - it went up for bg and play,
+# both of which load on a trigger rather than always, which is why the typical request
+# below did not move at all.
+check("all schemas are the number I claimed", 2500 < full < 3500, True)
 sizes = [tokens(ga.relevant_tools(p)) for p in (
     "fix the shader", "make a chart of my disk usage", "what gpu do I have",
     "write a pdf report with a chart", "rename this function everywhere")]

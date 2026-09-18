@@ -2,6 +2,7 @@
 
 import collections
 import itertools
+import json
 import os
 import re
 import shlex
@@ -358,6 +359,381 @@ def stop_all_background():
     return stopped
 
 
+# Programs opened with LAUNCH, so input can be aimed at a window we are responsible for.
+_launched = {}
+
+
+# Raw Linux keycodes, because ydotool works in them: there is no way for it to know the
+# keyboard layout, so key names are this side's job. These numbers are kernel ABI and do
+# not change. Only keys a person would press while playing or testing are listed - a key
+# that is not here is refused rather than guessed at.
+KEYCODES = {
+    "esc": 1, "escape": 1, "1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8,
+    "8": 9, "9": 10, "0": 11, "minus": 12, "equal": 13, "backspace": 14, "tab": 15,
+    "q": 16, "w": 17, "e": 18, "r": 19, "t": 20, "y": 21, "u": 22, "i": 23, "o": 24,
+    "p": 25, "enter": 28, "return": 28, "ctrl": 29, "leftctrl": 29,
+    "a": 30, "s": 31, "d": 32, "f": 33, "g": 34, "h": 35, "j": 36, "k": 37, "l": 38,
+    "semicolon": 39, "apostrophe": 40, "grave": 41, "shift": 42, "leftshift": 42,
+    "backslash": 43, "z": 44, "x": 45, "c": 46, "v": 47, "b": 48, "n": 49, "m": 50,
+    "comma": 51, "dot": 52, "period": 52, "slash": 53, "rightshift": 54,
+    "alt": 56, "leftalt": 56, "space": 57, "capslock": 58,
+    "f1": 59, "f2": 60, "f3": 61, "f4": 62, "f5": 63, "f6": 64, "f7": 65, "f8": 66,
+    "f9": 67, "f10": 68, "f11": 87, "f12": 88, "rightctrl": 97, "rightalt": 100,
+    "home": 102, "up": 103, "pageup": 104, "left": 105, "right": 106, "end": 107,
+    "down": 108, "pagedown": 109, "insert": 110, "delete": 111,
+}
+
+
+# ydotool's button values carry the press and release in a bit mask, and the button on
+# its own is documented as "chooses the button, but does nothing" - which it does
+# silently, so the first version of this reported a click it had never performed.
+CLICK_DOWN_UP = 0xC0
+MOUSE_BUTTONS = {"left": 0x00, "right": 0x01, "middle": 0x02}
+
+
+# A key held down for longer than this is a stuck key, not an input.
+MAX_HOLD_MS = 10000
+
+
+def input_socket():
+    return Path(os.environ.get("YDOTOOL_SOCKET")
+                or f"/run/user/{os.getuid()}/.ydotool_socket")
+
+
+def input_ready():
+    """Whether keys and clicks can be sent at all. Returns (ready, why not)."""
+    if WINDOWS:
+        return False, "[Sending input is only wired up for Linux at the moment.]"
+    if not shutil.which("ydotool"):
+        return False, ("[Refused: ydotool is not installed, so there is no way to send "
+                       "input. Install it, then start 'ydotoold'.]")
+    if not input_socket().exists():
+        return False, ("[Refused: the ydotool daemon is not running, so input cannot be "
+                       "sent. Start it with 'ydotoold &' and try again.]")
+    return True, ""
+
+
+def focused_window():
+    """The window with keyboard focus, as the compositor reports it, or None.
+
+    Input goes wherever focus is - it is injected at the kernel, not delivered to a
+    window - so knowing what is focused is the only thing standing between testing a
+    game and typing into whatever else happens to be open."""
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        out = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True,
+                             text=True, timeout=4)
+        window = json.loads(out.stdout or "{}")
+        return window if window.get("pid") else None
+    except Exception:
+        return None
+
+
+def pid_is_ours(pid):
+    """Whether a pid is a process Bonsai started, or a child of one.
+
+    A launcher usually forks: the window belongs to a descendant of what was started,
+    not to the pid that was returned, so the whole ancestry has to be walked."""
+    ours = set(_launched)
+    with _background_lock:
+        ours |= {p.popen.pid for p in _background.values()}
+    seen = set()
+    while pid and pid > 1 and pid not in seen:
+        if pid in ours:
+            return True
+        seen.add(pid)
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            pid = int(stat.rsplit(")", 1)[1].split()[1])
+        except Exception:
+            return False
+    return False
+
+
+# How far input may reach. "own" is the default because it is the only setting where a
+# mistake cannot touch anything but a program Bonsai was told to open.
+PLAY_SCOPES = {
+    "own": "only windows Bonsai opened itself",
+    "approved": "any window, once you have approved that window",
+    "any": "any window, no questions asked",
+}
+
+
+def play_target(scope="own"):
+    """The window input may be sent to, or a refusal saying why not.
+
+    Under "own" the window must belong to a process Bonsai started. "approved" widens
+    that to anything the user has said yes to, and "any" removes the check - but never
+    the check that SOMETHING has focus, because input with nothing focused simply goes
+    wherever the desktop last put it."""
+    ready, why = input_ready()
+    if not ready:
+        return None, why
+    window = focused_window()
+    if window is None:
+        return None, ("[Refused: there is no way to tell which window has focus on this "
+                      "setup, and input goes wherever focus is. Without that check it "
+                      "could land in your editor or browser. This needs hyprctl (or "
+                      "another compositor query) to be available.]")
+    if scope == "any" or pid_is_ours(window.get("pid")):
+        return window, ""
+    if scope == "approved" and window.get("address") in _approved_windows:
+        return window, ""
+    asking = ("Approve it for this session and it will be allowed."
+              if scope == "approved" else
+              "Input is only sent to a program opened from here, so it cannot type into "
+              "your editor, browser or terminal. Use PLAY: FOCUS <program> first, or "
+              "LAUNCH the thing you mean to test - or widen 'Input reaches' in "
+              "\u2699 Settings \u2192 Screen.")
+    return None, (f"[Refused: the focused window is {window.get('class') or '?'} "
+                  f"({window.get('title') or 'untitled'}), which Bonsai did not start. "
+                  + asking + "]")
+
+
+# Windows the user has said yes to this session, by compositor address.
+_approved_windows = set()
+
+
+def approve_window(address):
+    _approved_windows.add(address)
+
+
+def cursor_position():
+    """Where the pointer is, or None if the compositor cannot say."""
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        out = subprocess.run(["hyprctl", "cursorpos", "-j"], capture_output=True,
+                             text=True, timeout=4)
+        point = json.loads(out.stdout or "{}")
+        return (int(point["x"]), int(point["y"]))
+    except Exception:
+        return None
+
+
+def cursor_is_inside(window):
+    """Whether the pointer is over this window.
+
+    Focus decides where a KEY lands, but a click lands wherever the pointer physically
+    is - so the focus check alone would let a click go to whatever happens to be under
+    the mouse, which is exactly the window this tool must never touch."""
+    point = cursor_position()
+    if point is None or not window.get("at") or not window.get("size"):
+        return False
+    left, top = window["at"]
+    width, height = window["size"]
+    return left <= point[0] < left + width and top <= point[1] < top + height
+
+
+# How far from the requested spot the pointer may land and still count as placed.
+POINTER_TOLERANCE = 3
+
+
+def move_pointer_to(target_x, target_y, tries=14):
+    """Put the pointer at a screen position, checking where it actually went.
+
+    Neither kind of move can be trusted to do what it says. An absolute move is in the
+    input device's own coordinates, which are not the compositor's - on this machine a
+    move to 400 lands at 800 - and a relative move is fed through pointer acceleration,
+    so a large one overshoots. Both report success either way. So: move, look at where
+    it really is, and close the gap, which converges because each correction is smaller
+    and slower than the one before. Returns (position, failure)."""
+    for _ in range(tries):
+        at = cursor_position()
+        if at is None:
+            return None, ""
+        dx, dy = target_x - at[0], target_y - at[1]
+        if abs(dx) + abs(dy) <= POINTER_TOLERANCE:
+            return at, ""
+        failed = _ydotool(["mousemove", "-x", str(dx), "-y", str(dy)])
+        if failed:
+            return None, failed
+        time.sleep(0.03)
+    return cursor_position(), ""
+
+
+def _ydotool(args):
+    try:
+        done = subprocess.run(["ydotool"] + args, capture_output=True, text=True,
+                              timeout=MAX_HOLD_MS / 1000 + 10)
+    except Exception as exc:
+        return f"[Input failed: {exc}]"
+    if done.returncode != 0:
+        return f"[Input failed: {(done.stderr or done.stdout or '').strip()[:200]}]"
+    return ""
+
+
+def parse_keys(spec):
+    """'ctrl+s' or 'space' into keycodes, or (None, refusal)."""
+    names = [part.strip().lower() for part in str(spec).split("+") if part.strip()]
+    if not names:
+        return None, "[No key given. For example: PLAY: KEY space, or PLAY: KEY ctrl+s]"
+    codes = []
+    for name in names:
+        if name in ("super", "meta", "win", "leftmeta", "rightmeta"):
+            return None, ("[Refused: the super key belongs to the window manager, not to "
+                          "the program being tested. It would act on your desktop.]")
+        if name not in KEYCODES:
+            close = sorted(k for k in KEYCODES if k.startswith(name[:2]))[:6]
+            return None, (f"[Unknown key '{name}'."
+                          + (f" Did you mean: {', '.join(close)}?" if close else "")
+                          + "]")
+        codes.append(KEYCODES[name])
+    held = {KEYCODES["ctrl"], KEYCODES["alt"], KEYCODES["rightctrl"], KEYCODES["rightalt"]}
+    if held & set(codes) and any(59 <= c <= 88 for c in codes):
+        return None, ("[Refused: ctrl or alt with a function key switches virtual "
+                      "console or is caught by the desktop before the program sees it.]")
+    return codes, ""
+
+
+def handle_play(raw, scope="own"):
+    """PLAY: send keys and clicks to a program Bonsai opened, so it can be tried out.
+
+    Looking at a game says whether it renders. Playing it is the only way to find out
+    whether it works."""
+    action, _, rest = str(raw).strip().partition(" ")
+    action, rest = action.upper(), rest.strip()
+
+    if action == "WINDOWS":
+        if not shutil.which("hyprctl"):
+            return "[No hyprctl, so open windows cannot be listed.]"
+        try:
+            clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"],
+                                                capture_output=True, text=True,
+                                                timeout=4).stdout or "[]")
+        except Exception as exc:
+            return f"[Could not list windows: {exc}]"
+        if not clients:
+            return "(no windows open)"
+        return "\n".join(
+            f"{c.get('class') or '?'}: {c.get('title') or 'untitled'}"
+            f"{'  <- opened by Bonsai' if pid_is_ours(c.get('pid')) else ''}"
+            for c in clients)
+
+    if action == "FOCUS":
+        if not shutil.which("hyprctl"):
+            return "[No hyprctl, so windows cannot be focused from here.]"
+        if not rest:
+            return "[Which window? PLAY: FOCUS <window class>, e.g. PLAY: FOCUS godot]"
+        result = subprocess.run(["hyprctl", "dispatch", "focuswindow", f"class:{rest}"],
+                                capture_output=True, text=True, timeout=4)
+        time.sleep(0.4)             # the compositor needs a moment to actually switch
+        window = focused_window()
+        if window is None:
+            return f"[Could not confirm focus moved: {result.stdout.strip()[:120]}]"
+        if not pid_is_ours(window.get("pid")):
+            return (f"[Focus is now {window.get('class')}, which Bonsai did not start, "
+                    "so input still cannot be sent to it.]")
+        return (f"Focused {window.get('class')} ({window.get('title') or 'untitled'}). "
+                "Input will go here.")
+
+    window, refusal = play_target(scope)
+    if window is None:
+        return refusal
+    where = f"{window.get('class')} ({window.get('title') or 'untitled'})"
+
+    if action == "KEY":
+        codes, why = parse_keys(rest)
+        if codes is None:
+            return why
+        sequence = [f"{c}:1" for c in codes] + [f"{c}:0" for c in reversed(codes)]
+        failed = _ydotool(["key"] + sequence)
+        return failed or f"Pressed {rest} in {where}."
+
+    if action == "HOLD":
+        parts = rest.split()
+        if len(parts) != 2:
+            return ("[PLAY: HOLD <key> <milliseconds>, e.g. PLAY: HOLD right 800 to walk "
+                    "right for most of a second.]")
+        codes, why = parse_keys(parts[0])
+        if codes is None:
+            return why
+        try:
+            millis = int(parts[1])
+        except ValueError:
+            return f"[Couldn't read '{parts[1]}' as a number of milliseconds.]"
+        if not 0 < millis <= MAX_HOLD_MS:
+            return f"[Hold must be between 1 and {MAX_HOLD_MS} ms.]"
+        failed = _ydotool(["key"] + [f"{c}:1" for c in codes])
+        if failed:
+            return failed
+        time.sleep(millis / 1000)
+        failed = _ydotool(["key"] + [f"{c}:0" for c in reversed(codes)])
+        return failed or f"Held {parts[0]} for {millis}ms in {where}."
+
+    if action == "TYPE":
+        if not rest:
+            return "[Nothing to type.]"
+        failed = _ydotool(["type", rest])
+        return failed or f"Typed {len(rest)} character(s) into {where}."
+
+    if action == "POINT":
+        parts = rest.split()
+        if len(parts) != 2:
+            return ("[PLAY: POINT <x> <y> - where inside the window to put the pointer, "
+                    "measured from its top-left corner.]")
+        try:
+            x, y = int(parts[0]), int(parts[1])
+        except ValueError:
+            return "[POINT needs two whole numbers.]"
+        left, top = window.get("at", [0, 0])
+        width, height = window.get("size", [0, 0])
+        if not (0 <= x < width and 0 <= y < height):
+            return (f"[({x}, {y}) is outside the window, which is {width}x{height}. "
+                    "The pointer is only ever placed inside it.]")
+        landed, failed = move_pointer_to(left + x, top + y)
+        if failed:
+            return failed
+        if landed is None:
+            return "[Moved the pointer, but the compositor will not say where it ended up.]"
+        off = abs(landed[0] - (left + x)) + abs(landed[1] - (top + y))
+        actual = (landed[0] - left, landed[1] - top)
+        if off > POINTER_TOLERANCE:
+            return (f"[The pointer is at {actual} in {where}, not ({x}, {y}) - it could "
+                    "not be placed exactly. Work from where it actually is.]")
+        return f"Pointer is at {actual} inside {where}."
+
+    if action in ("CLICK", "MOVE"):
+        # A click goes where the pointer is, not where focus is. Sending one blind would
+        # click whatever happens to be under the mouse - which is the one thing this
+        # tool exists to prevent.
+        if not cursor_is_inside(window):
+            return (f"[Refused: the pointer is not over {where}, and a click lands where "
+                    "the pointer is rather than where focus is - so this would click "
+                    "whatever is under the mouse instead. Put it inside the window "
+                    "first with PLAY: POINT <x> <y>.]")
+
+    if action == "CLICK":
+        button = (rest or "left").lower()
+        if button not in MOUSE_BUTTONS:
+            return f"[Unknown button '{button}'. Use left, right or middle.]"
+        failed = _ydotool(["click",
+                           f"0x{CLICK_DOWN_UP | MOUSE_BUTTONS[button]:02x}"])
+        return failed or f"Clicked {button} in {where}."
+
+    if action == "MOVE":
+        parts = rest.split()
+        if len(parts) != 2:
+            return "[PLAY: MOVE <dx> <dy> - a movement, not a screen position.]"
+        try:
+            dx, dy = int(parts[0]), int(parts[1])
+        except ValueError:
+            return "[MOVE needs two whole numbers.]"
+        left, top = window.get("at", [0, 0])
+        width, height = window.get("size", [0, 0])
+        at = cursor_position() or (left, top)
+        if not (left <= at[0] + dx < left + width and top <= at[1] + dy < top + height):
+            return (f"[Refused: that would take the pointer outside {where}, where a "
+                    "later click would land on something else. Keep it inside, or use "
+                    "PLAY: POINT to place it.]")
+        failed = _ydotool(["mousemove", "-x", str(dx), "-y", str(dy)])
+        return failed or f"Moved the pointer by ({dx}, {dy}) in {where}."
+
+    return ("[PLAY needs KEY, HOLD, TYPE, POINT, CLICK, MOVE, FOCUS or WINDOWS. "
+            "For example: PLAY: KEY space]")
+
+
 LAUNCH_SETTLE = 1.5
 
 
@@ -534,8 +910,11 @@ def start_program(argv):
         time.sleep(0.1)
     code = process.poll()
     if code is None:
+        # Remembered so input can be aimed at its window later, and only at its window.
+        _launched[process.pid] = argv
         return (f"Opened '{shown}' (pid {process.pid}) and it is still running, so its "
-                "window is up. It keeps running after this turn - do not open it again.")
+                "window is up. It keeps running after this turn - do not open it again. "
+                "You can send it keys and clicks with PLAY once its window has focus.")
 
     printed = ""
     if log is not None:

@@ -659,6 +659,16 @@ class SettingsDialog(QDialog):
                     "active-monitor: the screen you are working on.\n"
                     "active-window: just the focused window - most detail per token.\n"
                     "all: every monitor, which loses detail on a wide desktop.")
+        self.choice("Screen", "play_scope", "Input reaches:",
+                    ["Only programs Bonsai opened", "Any window you approve",
+                     "Any window, no questions"],
+                    "How far PLAY's keys and clicks can go. Input is injected at the "
+                    "keyboard, so it lands in whatever window has focus - the first "
+                    "setting is the only one where a mistake cannot reach your editor, "
+                    "browser or terminal.",
+                    values={"Only programs Bonsai opened": "own",
+                            "Any window you approve": "approved",
+                            "Any window, no questions": "any"})
         self.spin("Screen", "capture_max_width", "Max width (px):", 640, 3840, 160)
         self.spin("Screen", "capture_max_height", "Max height (px):", 480, 2160, 120)
         self.spin("Screen", "capture_quality", "JPEG quality:", 50, 100, 5)

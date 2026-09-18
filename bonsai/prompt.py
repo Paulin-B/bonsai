@@ -350,6 +350,9 @@ TOOL_TRIGGERS = {
 
     "search_images": ("image", "picture", "photo", "illustration", "diagram", "icon",
                       "artwork", "logo", "wallpaper"),
+    "play": ("play the game", "test the game", "try it out", "press", "click",
+             "keyboard", "playtest", "does it work", "see if it works", "walk",
+             "jump", "controls", "input"),
     "bg": ("run the game", "start the server", "dev server", "watcher", "in the "
            "background", "keep it running", "while it runs", "godot", "npm run",
            "launch the game", "long-running", "playtest"),
@@ -451,6 +454,29 @@ def build_tool_schemas(only=None):
                                        "e.g. bg1."},
                "lines": {"type": "integer",
                          "description": "For READ: how many recent lines to show."}},
+              ["action"]),
+        _tool("play", "Try a program out instead of only looking at it. FOCUS its "
+              "window, then KEY a key or combination, HOLD one down (how you walk in a "
+              "game), TYPE text, POINT the mouse inside the window and CLICK. LOOK "
+              "afterwards to see what happened. Reaches only windows Bonsai opened.",
+              {"action": {"type": "string",
+                          "enum": ["KEY", "HOLD", "TYPE", "POINT", "CLICK", "MOVE",
+                                   "FOCUS", "WINDOWS"]},
+               "keys": {"type": "string",
+                        "description": "For KEY and HOLD: a key or combination, e.g. "
+                                       "'space', 'ctrl+s', 'left'."},
+               "milliseconds": {"type": "integer",
+                                "description": "For HOLD: how long to keep it down."},
+               "text": {"type": "string", "description": "For TYPE: the text to enter."},
+               "button": {"type": "string", "enum": ["left", "right", "middle"]},
+               "dx": {"type": "integer",
+                      "description": "For MOVE: horizontal movement. For POINT: x "
+                                     "inside the window, from its top-left corner."},
+               "dy": {"type": "integer",
+                      "description": "For MOVE: vertical movement. For POINT: y inside "
+                                     "the window."},
+               "window": {"type": "string",
+                          "description": "For FOCUS: the window class, e.g. 'godot'."}},
               ["action"]),
         _tool("edit", "Change part of an existing file by replacing one exact passage "
               "of its text. Prefer this over file_op WRITE whenever the file already "
@@ -656,6 +682,21 @@ def native_call_to_tool(name, arguments):
                 return "TASK", "REMOVE " + " ".join(str(n) for n in several)
             return "TASK", f"REMOVE {get('number', '')}"
         return "TASK", action
+    if name == "play":
+        action = str(get("action", "")).upper()
+        if action == "KEY":
+            return "PLAY", f"KEY {get('keys', '')}"
+        if action == "HOLD":
+            return "PLAY", f"HOLD {get('keys', '')} {get('milliseconds', 500)}"
+        if action == "TYPE":
+            return "PLAY", f"TYPE {get('text', '')}"
+        if action == "CLICK":
+            return "PLAY", f"CLICK {get('button', 'left')}"
+        if action in ("MOVE", "POINT"):
+            return "PLAY", f"{action} {get('dx', 0)} {get('dy', 0)}"
+        if action == "FOCUS":
+            return "PLAY", f"FOCUS {get('window', '')}"
+        return "PLAY", action
     if name == "bg":
         action = str(get("action", "")).upper()
         if action == "START":
