@@ -1359,7 +1359,8 @@ class Bonsai(QWidget):
         if (url, name) == (self.settings.get("server_url"),
                            self.settings.get("model") or ""):
             return
-        moved = url != self.settings.get("server_url")
+        was_at = self.settings.get("server_url")
+        moved = url != was_at
         self.settings["server_url"] = url
         self.settings["model"] = name
         save_settings(self.settings)
@@ -1375,6 +1376,9 @@ class Bonsai(QWidget):
                  + ". It applies from your next message; this conversation carries on "
                    "as it is.")
         if moved:
+            # Before refreshing the list, because the handover is what decides whether
+            # the new server is going to answer the question the refresh asks it.
+            self.switch_servers(was_at)
             QTimer.singleShot(0, self.refresh_models)
 
     def restyle_open_views(self):
@@ -2154,11 +2158,51 @@ class Bonsai(QWidget):
 
     # -- docker --
 
-    def compose_args(self, *extra):
-        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
+    def compose_file(self, url=None):
+        """The compose file that starts a server, or None if it has none to run.
+
+        An endpoint with nothing configured reads as Path(""), which is the current
+        directory - and a directory passes exists(), so asking "is it there" would have
+        run compose against a folder. The question is whether it is a file."""
+        name = (compose_for(self.settings.get("server_url") if url is None else url)
+                or "").strip()
+        if not name:
+            return None
+        path = Path(name).expanduser()
+        return path if path.is_file() else None
+
+    def compose_args(self, *extra, path=None):
+        path = Path(path) if path else Path(compose_for(self.settings.get("server_url"))).expanduser()
         # --project-directory is pinned so Compose identifies the project the same way
         # regardless of the shell's working directory.
         return ["compose", "-f", str(path), "--project-directory", str(path.parent), *extra]
+
+    def switch_servers(self, old_url):
+        """Move the GPU from the server just left to the one moved to.
+
+        Two local servers cannot both hold a card, so switching model used to mean
+        stopping one by hand, switching, and starting the other. Bonsai does it in that
+        order itself, and in that order specifically: starting first would meet a card
+        that is still full and fail somewhere inside the allocator, which says nothing
+        about what actually went wrong.
+
+        It acts only where a compose file is configured and present, so a remote API,
+        or a server run by hand, is left exactly as it is."""
+        leaving = self.compose_file(old_url)
+        arriving = self.compose_file()
+        if leaving and arriving and leaving == arriving:
+            return False        # the same server, serving a different model
+        if leaving:
+            self.log(f"Handing the GPU over: stopping {leaving.name}, then starting "
+                     f"{arriving.name}." if arriving else
+                     f"Stopping {leaving.name}, since nothing here needs the card now.")
+            self.stop_docker(path=leaving, then=self.start_docker if arriving else None)
+            return True
+        if arriving:
+            self.log(f"Starting {arriving.name} for the server you moved to.")
+            self.start_docker()
+            return True
+        return False
 
     def active_services(self):
         """Compose services to run: the required ones, plus whatever is switched on,
@@ -2170,7 +2214,7 @@ class Bonsai(QWidget):
         wanted = self.settings.get("services", DEFAULTS["services"])
         asked = [name for name, (_what, required) in DOCKER_SERVICES.items()
                  if required or wanted.get(name, False)]
-        defined = compose_services(compose_for(self.settings.get("server_url")))
+        defined = compose_services(self.compose_file())
         return [name for name in asked if name in defined] if defined else asked
 
     def toggle_docker(self):
@@ -2180,8 +2224,8 @@ class Bonsai(QWidget):
         """Stop specific services without touching the rest - used when one is switched
         off in Settings, so it doesn't keep running until the next full restart."""
         names = [n for n in names if n in DOCKER_SERVICES]
-        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
-        if not names or not path.exists():
+        path = self.compose_file()
+        if not names or path is None:
             return
         process = QProcess(self)
         self._service_stopper = process       # keep a reference past this scope
@@ -2189,9 +2233,10 @@ class Bonsai(QWidget):
         self.log(f"Stopping {', '.join(names)} - switched off in Settings.")
 
     def start_docker(self):
-        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
-        if not path.exists():
-            self.log(f"No compose file at {path}, so the services for the server you are using "
+        path = self.compose_file()
+        if path is None:
+            named = (compose_for(self.settings.get("server_url")) or "").strip()
+            self.log(f"No compose file at {named or '(none set)'}, so the services for the server you are using "
          "cannot be started. Set one on that server's line in \u2699 Settings "
          "\u2192 Model, or set Docker compose file under Services.", "red")
             self.docker_button.setEnabled(True)
@@ -2204,6 +2249,7 @@ class Bonsai(QWidget):
         self.docker.errorOccurred.connect(
             lambda e: self.log(f"Docker error: {e}. Is docker installed and in PATH?", "red"))
         services = self.active_services()
+
         skipped = [n for n in DOCKER_SERVICES if n not in services]
         if skipped:
             self.log(f"Not starting {', '.join(skipped)} - switched off in \u2699 Settings.")
@@ -2244,9 +2290,12 @@ class Bonsai(QWidget):
             self.log("Model server didn't respond in 3 minutes. Check "
                      "`docker compose logs bonsai-api`.", "red")
 
-    def stop_docker(self, blocking=False):
-        path = Path(compose_for(self.settings.get("server_url"))).expanduser()
-        if not path.exists():
+    def stop_docker(self, blocking=False, path=None, then=None):
+        """Stop a server's services. `path` names one other than the server in use,
+        which is how a handover stops the server being left rather than the new one;
+        `then` is what to do once it has actually let go."""
+        path = Path(path) if path else self.compose_file()
+        if path is None:
             return
         if self.health_timer:
             self.health_timer.stop()
@@ -2257,22 +2306,30 @@ class Bonsai(QWidget):
         # Naming an absent service fails the whole command, which is how Stop came to
         # report an error and leave everything running.
         known = compose_services(path) or list(DOCKER_SERVICES)
-        process.start("docker", self.compose_args("stop", *known))
+        process.start("docker", self.compose_args("stop", *known, path=path))
         if blocking:
             process.waitForFinished(15000)
             self.docker_up = False
             return
         self._stopper = process  # keep a reference so it isn't garbage collected
-        process.finished.connect(self.on_docker_stopped)
+        process.finished.connect(
+            lambda code, status: self.on_docker_stopped(code, status, then))
         self.docker_button.setEnabled(False)
 
-    def on_docker_stopped(self, code, _status):
+    def on_docker_stopped(self, code, _status, then=None):
         self.docker_button.setEnabled(True)
         self.docker_up = False
         self.docker_button.setText("Start Docker Services")
         self.status.setText("Docker services stopped" if code == 0 else "Docker stop had errors")
         if code == 0:
             self.log("--- docker services stopped ---")
+        if then and code == 0:
+            QTimer.singleShot(0, then)
+        elif then:
+            self.status.setText("Handover stopped")
+            self.log("The server you left did not stop, so it is still holding the card. "
+                     "The new one has NOT been started - it would fail on memory. Stop "
+                     "the old one by hand, then press Start Docker Services.", "red")
 
     def closeEvent(self, event):
         if self.observer_timer:

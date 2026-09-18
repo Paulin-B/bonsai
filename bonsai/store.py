@@ -264,9 +264,11 @@ def compose_services(path):
     Asking docker for a service the file does not have fails the whole command with
     "no such service", so a compose file that only brings up a model server must not
     be asked for a search backend as well."""
+    if not path:
+        return []               # an endpoint with no compose file defines no services
     try:
         text = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except (OSError, ValueError):
         return []
     if yaml is not None:
         try:
@@ -306,9 +308,17 @@ def compose_for(url=None):
     single compose_path setting, which is what a one-server setup has."""
     config = settings()
     here = url or config.get("server_url", DEFAULTS["server_url"])
-    match = next((e for e in endpoints() if e["url"] == here), None)
-    if match and match.get("compose"):
+    listed = endpoints()
+    match = next((e for e in listed if e["url"] == here), None)
+    if match and match["compose"]:
         return match["compose"]
+    if match and any(e["compose"] for e in listed):
+        # Once servers name their own files, a blank column means this server has none:
+        # a remote API, or one started by hand. Handing it the shared setting instead
+        # would let switching away from it stop a container belonging to someone else,
+        # or start a server nobody asked for. Where no server names a file, the single
+        # setting is still what everything uses.
+        return ""
     return config.get("compose_path", "")
 
 

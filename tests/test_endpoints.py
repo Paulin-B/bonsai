@@ -72,6 +72,19 @@ ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback
                   "endpoints": [{"name": "big", "url": B}]})
 check("a server with no file of its own falls back to the single setting",
       ga.compose_for(), "/srv/fallback.yml")
+check("and so does a second one beside it",
+      ga.compose_for(A), "/srv/fallback.yml")
+
+# But a blank column has to be able to mean "this one has no compose file", or a remote
+# API inherits the local server's, and switching away from it stops the wrong container.
+ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback.yml",
+                  "endpoints": [{"name": "small", "url": A, "compose": "/srv/small.yml"},
+                                {"name": "cloud", "url": B}]})
+check("once any server names a file, a blank column means none",
+      ga.compose_for(B), "")
+check("and the one that names a file still gets it", ga.compose_for(A), "/srv/small.yml")
+check("a url that is not listed at all still falls back",
+      ga.compose_for("http://elsewhere:9/v1/chat/completions"), "/srv/fallback.yml")
 ga.save_settings({**ga.DEFAULTS, "server_url": B, "compose_path": "/srv/fallback.yml",
                   "endpoints": []})
 check("and so does a one-server setup", ga.compose_for(), "/srv/fallback.yml")
