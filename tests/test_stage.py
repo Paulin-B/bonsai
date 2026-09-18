@@ -53,6 +53,7 @@ print("\n-- a display that never comes up is not reported as a stage --")
 # The lesson from PLAY, twice over: a process existing is not the same as the thing
 # working. An X server that fails still leaves a process behind for a moment.
 class _Dead:
+    pid = 424242            # the compositor is asked which window belongs to this
     def __init__(self, *a, **k): pass
     def poll(self): return 1
     def terminate(self): pass
@@ -73,6 +74,9 @@ class _Alive(_Dead):
     def poll(self): return None
 ga.stage.display_is_up = lambda display: True
 ga.stage.subprocess.Popen = lambda *a, **k: _Alive()
+# No real window belongs to a fake pid, and these tests must not touch the desktop.
+ga.stage.window_of_pid = lambda pid: None
+ga.stage.restore_focus = lambda window: True
 out = ga.handle_stage(f"START python3 loop.py | {work}")
 check("a live program gives a stage", out.startswith("Stage open on"), True)
 check("which says input cannot reach the desktop", "desktop is untouched" in out, True)

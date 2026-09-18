@@ -430,6 +430,67 @@ def focused_window():
         return None
 
 
+def hypr(call):
+    """Run one Hyprland dispatcher. Returns whether it was accepted.
+
+    Hyprland 0.56 reads dispatches as Lua, so the older "dispatch focuswindow class:x"
+    form is a parse error rather than an action - it reported nothing and did nothing,
+    and code that assumed otherwise was steering on an instruction that never ran."""
+    if not shutil.which("hyprctl"):
+        return False
+    try:
+        done = subprocess.run(["hyprctl", "dispatch", call], capture_output=True,
+                              text=True, timeout=4)
+    except Exception:
+        return False
+    return done.returncode == 0 and "error" not in (done.stdout or "").lower()
+
+
+def focus_window(selector):
+    """Give keyboard focus to a window, named as 'class:x' or 'address:0x...'."""
+    return hypr('hl.dsp.focus{window="' + str(selector).replace('"', "") + '"}')
+
+
+def restore_focus(window):
+    """Put keyboard focus back on the window that had it. Returns whether it worked.
+
+    Opening any window takes focus, which for a stage is exactly wrong: the point of
+    running a program on its own display is that the person keeps working, and a window
+    that grabs the keyboard the moment it appears takes that straight back."""
+    if not window or not window.get("address"):
+        return False
+    focus_window(f"address:{window['address']}")
+    time.sleep(0.3)
+    return (focused_window() or {}).get("address") == window["address"]
+
+
+def park_window(address, workspace):
+    """Move a window to another workspace so it is not sitting under the pointer.
+
+    With focus-follows-mouse - the default - a window that opens where the mouse is
+    keeps taking focus back however many times it is handed over, so the only way to
+    leave someone working is to put the window somewhere else entirely."""
+    if not address:
+        return False
+    if not focus_window(f"address:{address}"):
+        return False
+    time.sleep(0.2)
+    return hypr('hl.dsp.window.move{workspace="' + str(workspace) + '", silent=true}')
+
+
+def window_of_pid(pid):
+    """The compositor's record of the window belonging to a process, or None."""
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"],
+                                            capture_output=True, text=True,
+                                            timeout=4).stdout or "[]")
+    except Exception:
+        return None
+    return next((c for c in clients if c.get("pid") == pid), None)
+
+
 def pid_is_ours(pid):
     """Whether a pid is a process Bonsai started, or a child of one.
 
@@ -616,12 +677,11 @@ def handle_play(raw, scope="own"):
             return "[No hyprctl, so windows cannot be focused from here.]"
         if not rest:
             return "[Which window? PLAY: FOCUS <window class>, e.g. PLAY: FOCUS godot]"
-        result = subprocess.run(["hyprctl", "dispatch", "focuswindow", f"class:{rest}"],
-                                capture_output=True, text=True, timeout=4)
+        focus_window(f"class:{rest}")
         time.sleep(0.4)             # the compositor needs a moment to actually switch
         window = focused_window()
         if window is None:
-            return f"[Could not confirm focus moved: {result.stdout.strip()[:120]}]"
+            return "[Could not confirm which window has focus after asking to switch.]"
         if not pid_is_ours(window.get("pid")):
             return (f"[Focus is now {window.get('class')}, which Bonsai did not start, "
                     "so input still cannot be sent to it.]")

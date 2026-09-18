@@ -21,7 +21,10 @@ from pathlib import Path
 from PIL import Image
 
 from .media import encode_frame
-from .shell import classify_command, trim_output
+from .shell import (
+    classify_command, focused_window, park_window, restore_focus, trim_output,
+    window_of_pid,
+)
 
 
 # Display numbers are picked from here upward. High enough to stay clear of a real
@@ -35,6 +38,11 @@ DISPLAY_TIMEOUT = 15
 
 
 MAX_STAGE_HOLD_MS = 10000
+
+
+# Where a watchable stage is put so it is not under the pointer. With focus-follows-mouse
+# a window sitting where the mouse is takes focus back however often it is handed over.
+STAGE_WORKSPACE = 9
 
 
 _stage = None
@@ -151,6 +159,10 @@ def start_stage(raw, visible=True, size="1280x720"):
     if display is None:
         return "[Refused: no free display number between :80 and :96.]"
 
+    # Noted before anything opens, so the keyboard can be handed straight back. A stage
+    # that takes focus has defeated its own purpose.
+    was_focused = focused_window()
+
     server_argv = (["Xephyr", "-screen", size, "-resizeable", display] if visible
                    else ["Xvfb", display, "-screen", "0", f"{size}x24"])
     try:
@@ -186,6 +198,12 @@ def start_stage(raw, visible=True, size="1280x720"):
 
     _stage = stage
     time.sleep(1.5)                 # long enough to fail loudly rather than silently
+    parked = False
+    if visible:
+        shown = window_of_pid(server.pid)
+        if shown:
+            parked = park_window(shown.get("address"), STAGE_WORKSPACE)
+    handed_back = restore_focus(was_focused)
     if not stage.program_alive():
         printed = trim_output(stage.log.read_text(errors="replace").strip(), 900)
         code = stage.program.poll()
@@ -200,7 +218,13 @@ def start_stage(raw, visible=True, size="1280x720"):
             + (f"It has {len(seen)} window(s): {', '.join(seen[:4])}.\n" if seen else
                "It has no window yet - give it a moment and STAGE: LOOK.\n")
             + "Input from STAGE goes only here, so the desktop is untouched and you can "
-              "keep using it.")
+              "keep using it."
+            + (f"\nIt is on workspace {STAGE_WORKSPACE}, out of the way - switch there to "
+               "watch it." if parked else "")
+            + ("" if handed_back or not visible else
+               "\n[Note: the stage window took keyboard focus and it could not be handed "
+               "back. Click where you were working, or start it with 'hidden' next time "
+               "so there is no window at all.]"))
 
 
 def stage_windows():
