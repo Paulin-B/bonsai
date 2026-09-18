@@ -30,21 +30,27 @@ print("\n-- write shrink guard (your 1397 -> 154 clobber) --")
 d = Path(__file__).parent / "autocases"; d.mkdir(exist_ok=True)
 f = d / "grid_reservation.gd"
 
-f.write_text("x" * 1397)
-r = ga.do_write(str(f), "y" * 154)
+def gd(size):
+    """Valid GDScript of exactly `size` bytes - a comment is a whole file's worth of
+    legal syntax. This block is about how much of a file a write removes, and .gd is
+    now parsed for real, so padding it with 'x' told us about the parser instead."""
+    return "# " + "x" * (size - 3) + "\n"
+
+f.write_text(gd(1397))
+r = ga.do_write(str(f), gd(154))
 check("gutting an existing file warns", "WARNING" in r and "most of the file is gone" in r, True)
 check("  ...and points at EDIT", "use EDIT instead of WRITE" in r, True)
 check("  ...and the write still happened", f.stat().st_size, 154)
 
-f.write_text("x" * 1397)
-r = ga.do_write(str(f), "y" * 1300)
+f.write_text(gd(1397))
+r = ga.do_write(str(f), gd(1300))
 check("a normal rewrite is quiet", "WARNING" in r, False)
 
-f.write_text("x" * 120)
-r = ga.do_write(str(f), "y" * 10)
+f.write_text(gd(120))
+r = ga.do_write(str(f), gd(10))
 check("tiny files don't trip it", "WARNING" in r, False)
 
-r = ga.do_write(str(d / "brand_new.gd"), "y" * 10)
+r = ga.do_write(str(d / "brand_new.gd"), gd(10))
 check("a new file doesn't trip it", "WARNING" in r, False)
 
 print("\n-- unattended flag reaches the worker --")

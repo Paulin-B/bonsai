@@ -10,7 +10,9 @@ def check(label, got, want):
 
 sandbox = Path(tempfile.mkdtemp(prefix="bonsai-tasks-"))
 ga.TASKS_FILE = sandbox / "tasks.json"
-real = sandbox / "item_manager.gd"; real.write_text("extends Node\n" + "x" * 900)
+BODY = "extends Node\n" + "".join(
+    f"\nvar value_{n} := {n}" for n in range(90))   # valid GDScript, ~1KB
+real = sandbox / "item_manager.gd"; real.write_text(BODY)
 stub = sandbox / "stub.gd"; stub.write_text("extends Node")
 
 print("\n-- replaying the run that closed 11 tasks against 4 files --")

@@ -109,10 +109,92 @@ def _check_javascript(path, text):
     return "" if done.returncode == 0 else _node_error(done.stderr)
 
 
+# Godot has to load the engine to parse a script, so this is slower than the others.
+GODOT_CHECK_TIMEOUT = 25
+
+
+GODOT_ERROR_RE = re.compile(r"Parse Error:\s*(.+?)\s*$", re.M)
+
+
+GODOT_LINE_RE = re.compile(r"GDScript::reload \([^)]*:(\d+)\)")
+
+
+# Errors that only mean "the rest of the project was not loaded". Inside a project they
+# are real and are reported; for a loose script there is nothing to resolve against, so
+# reporting them would fail a perfectly good file for want of context.
+GODOT_NEEDS_PROJECT_RE = re.compile(
+    r"Could not find type|Could not resolve class|not declared in the current scope|"
+    r"Identifier \"[^\"]+\" not declared", re.I)
+
+
+def _godot_project_root(path):
+    """The nearest folder above a script holding project.godot, or None.
+
+    Checking a script on its own cannot resolve a class_name defined in a sibling file,
+    so a file that is perfectly correct reports a missing type. The project is the unit
+    Godot resolves names in, so that is what it has to be given."""
+    for folder in list(Path(path).resolve().parents)[:10]:
+        if (folder / "project.godot").is_file():
+            return folder
+    return None
+
+
+def _check_gdscript(path, text):
+    """Godot's own parser, because it is the only one that agrees with Godot.
+
+    tree-sitter's GDScript grammar is error-tolerant by design. It accepted a file with
+    a block indented into the class body - exactly the shape a mis-applied EDIT leaves
+    behind - while Godot refused to load it outright. A check that passes what the
+    engine rejects is worse than no check, because the silence is taken as evidence the
+    write was sound."""
+    godot = shutil.which("godot") or shutil.which("godot4")
+    if not godot:
+        return ""
+    target, scratch = path, None
+    on_disk = None
+    try:
+        on_disk = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    if text != on_disk:
+        # Checking text that is not what is on disk yet, so it needs somewhere to live.
+        scratch = path.with_name(path.name + ".bonsai-check.gd")
+        try:
+            scratch.write_text(text, encoding="utf-8")
+            target = scratch
+        except OSError:
+            return ""
+    root = _godot_project_root(target)
+    argv = [godot, "--headless"]
+    if root is not None:
+        argv += ["--path", str(root)]
+    argv += ["--check-only", "--script", str(target)]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=GODOT_CHECK_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError):
+        return ""            # a checker that cannot run must not fail the write
+    finally:
+        if scratch is not None:
+            try:
+                scratch.unlink()
+            except OSError:
+                pass
+    output = (done.stderr or "") + (done.stdout or "")
+    found = GODOT_ERROR_RE.search(output)
+    if not found:
+        return ""
+    if root is None and GODOT_NEEDS_PROJECT_RE.search(found.group(1)):
+        return ""            # unresolvable without the project, not a fault in the file
+    line = GODOT_LINE_RE.search(output)
+    return (f"line {line.group(1)}: {found.group(1)}" if line else found.group(1))
+
+
 # Only formats with a parser that is actually installed. A suffix that is absent here
 # is simply not checked - claiming to verify something and not doing it would be worse
 # than saying nothing.
 SYNTAX_CHECKERS = {
+    ".gd": _check_gdscript,
     ".py": _check_python, ".pyw": _check_python,
     ".json": _check_json,
     ".toml": _check_toml,

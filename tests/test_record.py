@@ -195,5 +195,23 @@ ledgers({"files": {}, "notes": [], "updated": ""}, only_read)
 check("with nothing recorded anywhere it still picks one",
       ga.active_project() in (str(code), str(docs)), True)
 
+print("\n-- a failed change must not lock the way out --")
+# From a real run: an EDIT did not match, so the model re-read the file to find out
+# why - and the repeat guard refused the read, because it had read it earlier in the
+# same turn. With nothing left but to guess, it retried the same edit until the turn
+# was ended. Re-reading after a failure is the recovery, not more of the same.
+over = ga.MAX_IDENTICAL_CALLS
+check("a first call is never blocked", ga.blocked_as_repeat("READ_FILE", 0, False), False)
+check("nor one below the limit",
+      ga.blocked_as_repeat("FILE_OP", over - 1, False), False)
+check("a repeat past the limit is refused",
+      ga.blocked_as_repeat("FILE_OP", over, False), True)
+check("even after a failure, if it is the same change again",
+      ga.blocked_as_repeat("FILE_OP", over, True), True)
+check("but re-reading after a failure is allowed",
+      ga.blocked_as_repeat("READ_FILE", over, True), False)
+check("and re-reading when nothing failed is still a repeat",
+      ga.blocked_as_repeat("READ_FILE", over, False), True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

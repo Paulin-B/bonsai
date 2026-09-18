@@ -17,7 +17,7 @@ from .store import (
     all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, unreachable_server,
 )
 from .text import (
-    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -514,6 +514,7 @@ class Worker(QThread):
             results = []
             call_counts = {}    # (tool, arg) -> how many times it was asked for
             refusals = 0        # consecutive results that were refusals or errors
+            last_failed = False # whether the call before this one came back refused
             looping = False
             unfinished = {}     # target -> why its last mutation attempt failed
             changed = False     # did any mutation actually land this turn
@@ -644,7 +645,7 @@ class Worker(QThread):
                 repeats = call_counts.get(signature, 0)
                 call_counts[signature] = repeats + 1
 
-                if repeats >= MAX_IDENTICAL_CALLS:
+                if blocked_as_repeat(name, repeats, last_failed):
                     # Warning about the repeat twice changed nothing, so this one simply
                     # is not run. A single refused TASK ADD otherwise looped 180 times.
                     result = ("[Not run: you have already made this exact call with these "
@@ -662,6 +663,7 @@ class Worker(QThread):
                 # Refusals are bracketed by convention; a run of them means the turn is
                 # going nowhere, whether or not the calls are identical.
                 refusals = refusals + 1 if result.startswith("[") else 0
+                last_failed = result.startswith("[")
 
                 if name in MUTATING_TOOLS:
                     target = mutation_target(name, argument)

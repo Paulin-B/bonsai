@@ -234,6 +234,19 @@ def strip_record_echo(reply):
     return RECORD_ECHO_RE.sub("", ACTIONS_ECHO_RE.sub("", reply).strip()).strip()
 
 
+def blocked_as_repeat(name, repeats, last_failed):
+    """Whether a tool call should be refused for being an exact repeat.
+
+    Repeating a call that already answered is how a turn loops forever, so it is
+    refused. Re-reading a file after a failure is the exception: an EDIT that does not
+    match means what was believed about the file is wrong, and looking again is the
+    only way to find out how. Blocking that left a real run with nothing to do but
+    guess, and it retried the same failing edit until the turn was ended."""
+    if repeats < MAX_IDENTICAL_CALLS:
+        return False
+    return not (name == "READ_FILE" and last_failed)
+
+
 def narrate_trace(trace):
     """The turn's tool calls as prose, with repeated calls collapsed to one line.
 

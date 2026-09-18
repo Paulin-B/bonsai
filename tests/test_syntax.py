@@ -54,8 +54,30 @@ check("a genuinely broken module is still caught",
       bool(wrote("badmod.js", "import x from './x.js';\nfunction f( {\n")), True)
 
 print("\n-- anything without a parser installed is silently skipped --")
-for name in ("a.html", "a.css", "shader.frag", "a.gd", "a.rs", "a.md", "a.txt"):
+for name in ("a.html", "a.css", "shader.frag", "a.rs", "a.md", "a.txt"):
     check(f"{name} is not checked", wrote(name, "this is (((not parseable"), "")
+
+print("\n-- but GDScript is checked by Godot itself, when Godot is installed --")
+# tree-sitter's GDScript grammar is error-tolerant: it accepted a block indented into
+# the class body - the shape a mis-applied EDIT leaves - while Godot refused to load
+# the file. A check that passes what the engine rejects is worse than none, because the
+# silence is read as proof the write was sound.
+import shutil
+if shutil.which("godot") or shutil.which("godot4"):
+    check("a stray indented block is caught",
+          "Indent" in wrote("bad.gd", "extends Node\nvar x = 1\n\tvar y = 2\n"), True)
+    check("and it says which line",
+          wrote("bad.gd", "extends Node\nvar x = 1\n\tvar y = 2\n").startswith("line "),
+          True)
+    check("a misspelt keyword is caught",
+          bool(wrote("typo.gd", "extends Node\nfunc f():\n\tretrun 1\n")), True)
+    check("good GDScript passes",
+          wrote("fine.gd", "extends Node\n\nfunc add(a, b):\n\treturn a + b\n"), "")
+    check("a type it cannot resolve outside a project is not called a fault",
+          wrote("typed.gd", "extends Node\nvar item: ItemData\n"), "")
+else:
+    check("godot is not installed, so .gd is skipped",
+          wrote("a.gd", "this is (((not parseable"), "")
 
 print("\n-- checking never executes what was written --")
 marker = box / "SHOULD_NOT_EXIST"

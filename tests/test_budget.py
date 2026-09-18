@@ -81,8 +81,10 @@ check("prompt caching enabled", '"cache_prompt": True' in src, True)
 print("\n-- one file cannot close two tasks --")
 box = Path(tempfile.mkdtemp(prefix="bonsai-dupe-"))
 ga.TASKS_FILE = box / "tasks.json"
-real = box / "item_manager.gd"; real.write_text("extends Node\n" + "x" * 900)
-other = box / "bot_agent.gd"; other.write_text("extends Node\n" + "y" * 900)
+BODY = "extends Node\n" + "".join(
+    f"\nvar value_{n} := {n}" for n in range(90))   # valid GDScript, ~1KB
+real = box / "item_manager.gd"; real.write_text(BODY)
+other = box / "bot_agent.gd"; other.write_text(BODY.replace("value_", "other_"))
 ga.handle_task("ADD Data-Oriented Item Manager")
 ga.handle_task("ADD Bot Navigation and State Machine")
 ga.handle_task(f"DONE 1 | {real}")
