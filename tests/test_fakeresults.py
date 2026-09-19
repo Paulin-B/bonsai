@@ -86,5 +86,39 @@ check("and before the reply is emitted",
 check("and the user is told it was invented", "was made up" in src, True)
 check("the system prompt forbids writing one", "inventing evidence" in src, True)
 
+print("\n-- the shapes a real run used to claim work it had not done --")
+# Verbatim from a chat where eleven replies ran no tool at all. It said it had reviewed
+# two sprite packs, integrated them, and marked a task done. None of it happened: the
+# task was still open with no evidence and nothing in the project had changed. Every
+# check missed, because the claims were in the passive voice and "marked as DONE" was
+# not a phrase any of them knew.
+def flagged(text):
+    plain = ga.plain_text(text)
+    return bool(ga.CLAIMED_ACTION_RE.search(plain) or ga.CLAIMED_TASK_RE.search(plain))
+
+for said in [
+    "I've reviewed the sprite sheet you added to `/media/D/Bonsai-Storage/automation pack/`.",
+    "I've integrated the sprite sheet into the Factory Sim project by updating the visuals.",
+    "Task [11] has been marked as DONE. The sprite sheet has been successfully integrated.",
+    "The file was updated to use the new atlas.",
+    "The assets have been imported into the project.",
+    "I marked task 3 as done.",
+]:
+    check(f"caught: {said[:52]}", flagged(said), True)
+
+print("\n-- but saying it did NOT happen is the opposite of a claim --")
+# This is the honesty the checks exist to encourage; warning about it would punish it.
+for said in [
+    "Task 7 has not been marked as done, because the handshake is still a stub.",
+    "Task 11 hasn't been marked as done yet.",
+    "I have not marked it as done.",
+    "I never marked task 3 done.",
+    "Task [11] has not been completed - nothing was integrated.",
+    "Nothing was written, because the edit did not match.",
+    "I can integrate the sprites once you tell me which folder is authoritative.",
+    "Which of the two do you want me to start with?",
+]:
+    check(f"allowed: {said[:52]}", flagged(said), False)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

@@ -105,13 +105,31 @@ EVOLVE_KEYS = {"TRAIT": "learned_traits", "OPINION": "opinions", "JOKE": "runnin
 
 # Phrases that assert an action was taken. If one appears in a turn where no tool
 # actually ran, the claim is unverifiable - surface that rather than let it pass.
+# Verbs that assert work was carried out. Kept in one place because they are needed in
+# both voices: a turn that did nothing said "I've integrated the sprite sheet" and then
+# "Task [11] has been marked as DONE", and a check that only knew "I did X" saw neither.
+DID_VERBS = (
+    r"updated|replaced|written|wrote|created|saved|overwrote|overwritten|deleted|"
+    r"renamed|moved|downloaded|installed|fixed|swapped|updating|writing|replacing|"
+    r"implemented|completed|finished|built|added|established|refactored|generated|"
+    r"set up|put together|removed|cleared|closed|marked|integrated|wired|hooked up|"
+    r"imported|reviewed|inspected|examined"
+)
+
+
+# "Task 7 has NOT been marked as done" is the opposite of a claim - it is the honesty
+# these checks exist to encourage, and warning about it would punish saying so.
+NOT_NEGATED = r"(?!not\s|never\s|n.t\s)"
+
+
 CLAIMED_ACTION_RE = re.compile(
     r"\b(?:I(?:'ve| have)?\s+"
     r"(?:now\s+|just\s+|already\s+|finished\s+|successfully\s+|gone ahead and\s+){0,3}"
-    r"(?:updated|replaced|written|wrote|created|saved|overwrote|overwritten|deleted|"
-    r"renamed|moved|downloaded|installed|fixed|swapped|updating|writing|replacing|"
-    r"implemented|completed|finished|built|added|established|refactored|generated|"
-    r"set up|put together|removed|cleared|closed|marked)"
+    rf"(?:{DID_VERBS})"
+    # The passive voice says the same thing without a subject, and was how every claim
+    # in that turn was phrased: "has been marked", "was integrated".
+    rf"|(?:has|have|had)\s+{NOT_NEGATED}been\s+(?:successfully\s+)?(?:{DID_VERBS})"
+    rf"|(?:was|were)\s+{NOT_NEGATED}(?:successfully\s+)?(?:{DID_VERBS})\s+(?:into|to|in|from|at|with|as)\b"
     r"|I(?:'m| am)\s+(?:now\s+)?(?:drafting|writing|creating|saving|adding)\s+(?:this|that|it|a|an|the)"
     r"|consider it done|done!|it'?s done|all set|successfully (?:wrote|created|updated|"
     r"replaced|downloaded|renamed)|(?:are|is) now (?:updated|saved|written|correctly saved))",
@@ -413,11 +431,19 @@ def invented_recall(reply, trace):
 
 # Claims that the task list changed, and the trace evidence that it actually did.
 # A reply can describe removing seven tasks while only TASK: LIST ever ran.
+# Closing a task is the claim made most often, and "marked as DONE" was not in here at
+# all - so a turn that ran no TASK call said a task was done and nothing objected.
+TASK_CLAIM_VERBS = r"removed|deleted|cleared|closed|marked done|marked as done|marked complete"
+
+
 CLAIMED_TASK_RE = re.compile(
-    r"\b(?:tasks?\s*\[?\d+\]?\s*(?:\([^)]*\)\s*)?(?:has been|have been|was|were|is|are)?"
-    r"\s*(?:removed|deleted|cleared|closed)"
-    r"|(?:removed|deleted|cleared)\s+(?:the\s+|all\s+|any\s+)?(?:completed\s+|done\s+)?tasks?"
-    r"|tasks?\s+(?:have been|has been|were|was)\s+(?:removed|deleted|cleared|closed))",
+    rf"\b(?:tasks?\s*\[?\d+\]?\s*"
+    rf"(?:(?:has|have|had)\s+{NOT_NEGATED}been\s+|(?:was|were|is|are)\s+{NOT_NEGATED})?"
+    rf"(?:{TASK_CLAIM_VERBS})"
+    rf"|(?:removed|deleted|cleared|closed)\s+(?:the\s+|all\s+|any\s+)?(?:completed\s+|done\s+)?tasks?"
+    rf"|tasks?\s+(?:(?:have|has)\s+{NOT_NEGATED}been|(?:were|was)\s+{NOT_NEGATED})\s*(?:{TASK_CLAIM_VERBS})"
+    r"|(?<!not been )(?<!never been )(?<!n.t been )(?<!not )(?<!never )"
+    rf"(?:marked|marking)\s+(?:it\s+|task\s*\[?\d+\]?\s*)?(?:as\s+)?done)",
     re.IGNORECASE)
 
 
