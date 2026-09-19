@@ -84,5 +84,54 @@ check("CLEAR", ga.handle_task("CLEAR"), "Task list cleared.")
 check("empty list", ga.handle_task("LIST"), "Tasks:\n(the list is empty)")
 
 shutil.rmtree(sandbox)
+print("\n-- one file can finish several tasks, if it changed in between --")
+# From a real run: the Hunger Bar was implemented, DONE was refused because that file
+# had already closed an earlier task, and the next call was REMOVE. The task was gone
+# and the work went unrecorded. The objection is stale evidence, not a second task.
+ga.save_tasks([], 1)
+ga.handle_task("ADD fix the parse error in mother_machine")
+ga.handle_task("ADD implement the hunger bar in mother_machine")
+ga.handle_task("ADD wire mother machine to the buffer manager")
+shared = sandbox / "mother_machine.gd"
+shared.write_text(BODY)
+
+r = ga.handle_task(f"DONE 1 | {shared}")
+check("the first task closes on it", r.startswith("Marked done"), True)
+r = ga.handle_task(f"DONE 2 | {shared}")
+check("the same bytes cannot close a second", r.startswith("[Not marked done"), True)
+check("and it says why - the file has not changed", "has not changed since" in r, True)
+check("task 2 is still open", ga.load_tasks()[1]["done"], False)
+
+shared.write_text(BODY + "\nvar hunger_bar := 1.0")
+r = ga.handle_task(f"DONE 2 | {shared}")
+check("once the file really changes, it closes", r.startswith("Marked done"), True)
+check("and task 2 is done", ga.load_tasks()[1]["done"], True)
+shared.write_text(BODY + "\nvar hunger_bar := 1.0\nvar manager: BufferManager")
+check("and again for the next piece of work",
+      ga.handle_task(f"DONE 3 | {shared}").startswith("Marked done"), True)
+check("each one recorded what the file said at the time",
+      len({t["evidence_fingerprint"] for t in ga.load_tasks()}), 3)
+
+print("\n-- a task nobody is watching cannot be deleted --")
+# The escape hatch the real run took: DONE refused, so REMOVE, and the record of the
+# work was gone.
+ga.save_tasks([], 1)
+ga.handle_task("ADD something it cannot finish")
+r = ga.handle_task("REMOVE 1", unattended=True)
+check("removal is refused unattended", r.startswith("[Not removed"), True)
+check("the task survives", len(ga.load_tasks()), 1)
+check("and it is told to say it is blocked instead", "what is blocking you" in r, True)
+check("with the way to close it properly named", "TASK: DONE" in r, True)
+check("but a person can still remove it",
+      ga.handle_task("REMOVE 1", unattended=False).startswith("Removed:"), True)
+check("and then it is gone", len(ga.load_tasks()), 0)
+
+print("\n-- the worker passes that through --")
+worker = ga.Worker("do the tasks", False, [], {**ga.settings(), "unattended": True})
+ga.handle_task("ADD a task to try to delete")
+check("a tool call from an unattended turn cannot remove",
+      worker.run_tool("TASK", "REMOVE 1").startswith("[Not removed"), True)
+check("the task is still there", len(ga.load_tasks()), 1)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

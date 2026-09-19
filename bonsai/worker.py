@@ -472,7 +472,7 @@ class Worker(QThread):
                 return note
             return handle_stage(argument)
         if name == "TASK":
-            return handle_task(argument)
+            return handle_task(argument, self.config.get("unattended", False))
         if name == "FILE_OP":
             return self.run_file_op(argument)
         if name == "SAVE_SKILL":

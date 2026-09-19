@@ -1,7 +1,9 @@
 """Tasks, evidence, handing off an unfinished turn, and learning procedures."""
 
+import hashlib
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from .config import (
     PATTERNS_FILE, SKILLS_FILE, TASKS_FILE,
 )
@@ -165,10 +167,22 @@ def format_tasks(tasks):
     return "\n".join(lines)
 
 
-def handle_task(raw):
+def evidence_fingerprint(path):
+    """What the file said when it closed a task, so a later task can tell whether it is
+    offering the same work again or work done since."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def handle_task(raw, unattended=False):
     """TASK: ADD <text> | LIST | DONE <id> | REMOVE <id> | CLEAR - a scratchpad that
     survives across turns. Ids are stable, so an id always refers to the same task
-    no matter what else has been removed."""
+    no matter what else has been removed.
+
+    `unattended` closes the escape hatch that a real run went through: the evidence
+    check refused to close a task, so it deleted the task instead."""
     raw = re.sub(r"^\s*(ADD|LIST|DONE|CLEAR_DONE|CLEAR|REMOVE)\s*[:|]\s*", r"\1 ",
                  raw.strip(), count=1, flags=re.I)
     parts = raw.strip().split(None, 1)
@@ -210,17 +224,24 @@ def handle_task(raw):
         proof, problem = verify_evidence(evidence_raw)
         if problem:
             return f"{problem}\n{format_tasks(tasks)}"
+        fingerprint = evidence_fingerprint(proof)
         for other in tasks:
-            if other["id"] != task["id"] and other.get("evidence") == str(proof):
-                # Exact, unlike the fuzzy duplicate check on ADD: one file closing two
-                # tasks means the same work was counted twice.
+            if other["id"] == task["id"] or other.get("evidence") != str(proof):
+                continue
+            # The objection is stale evidence, not a second task. One file genuinely
+            # can finish several - a class gets its parse error fixed, then its rate
+            # limit, then its wiring - so what matters is whether the file has changed
+            # since it last closed one. Refusing outright pushed a real run into
+            # deleting the task it could not close.
+            if other.get("evidence_fingerprint", "") == fingerprint and fingerprint:
                 return (f"[Not marked done: {proof.name} already closed task "
-                        f"{other['id']} (\"{other['text']}\"). One file cannot finish two "
-                        "tasks - either this task needs its own file, or it is a "
-                        f"restatement of {other['id']} and should be removed.]\n"
-                        f"{format_tasks(tasks)}")
+                        f"{other['id']} (\"{other['text']}\") and has not changed since, "
+                        "so this would count the same work twice. Change the file for "
+                        f"this task, or say that {task['id']} is a restatement of "
+                        f"{other['id']}.]\n{format_tasks(tasks)}")
         task["done"] = True
         task["evidence"] = str(proof)
+        task["evidence_fingerprint"] = fingerprint
         save_tasks(tasks)
         return (f"Marked done: {task['text']} (verified {proof}, "
                 f"{proof.stat().st_size} bytes)\n{format_tasks(tasks)}")
@@ -229,6 +250,16 @@ def handle_task(raw):
         wanted = [int(n) for n in re.findall(r"\d+", argument)]
         if not wanted:
             return f"[TASK REMOVE needs a task id, e.g. TASK: REMOVE 3]\n{format_tasks(tasks)}"
+        if unattended:
+            # Watched in a real run: DONE was refused, so the next call was REMOVE and
+            # the task was gone. Deleting the record of work nobody is watching is not
+            # a decision to take alone - being stuck is worth saying out loud instead.
+            named = ", ".join(str(n) for n in dict.fromkeys(wanted))
+            return (f"[Not removed. Nobody is watching this run, so a task is not "
+                    f"deleted from it - say what is blocking you on {named} and leave "
+                    "it for a person to decide. If the work is genuinely done, close it "
+                    "with TASK: DONE and the file that shows it.]\n"
+                    f"{format_tasks(tasks)}")
         hit, missed = [], []
         for task_id in dict.fromkeys(wanted):
             task = by_id.get(task_id)
