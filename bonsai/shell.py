@@ -531,6 +531,20 @@ def park_window(address, workspace):
     return hypr('hl.dsp.window.move{workspace="' + str(workspace) + '", silent=true}')
 
 
+def open_windows():
+    """Every window the compositor currently has, as {address: "class - title"}."""
+    if not shutil.which("hyprctl"):
+        return {}
+    try:
+        clients = json.loads(subprocess.run(["hyprctl", "clients", "-j"],
+                                            capture_output=True, text=True,
+                                            timeout=4).stdout or "[]")
+    except Exception:
+        return {}
+    return {c.get("address"): f"{c.get('class') or '?'} - {c.get('title') or 'untitled'}"
+            for c in clients if c.get("address")}
+
+
 def window_of_pid(pid):
     """The compositor's record of the window belonging to a process, or None."""
     if not shutil.which("hyprctl"):
@@ -999,6 +1013,7 @@ def start_program(argv):
                                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     else:
         detach["start_new_session"] = True
+    before_windows = open_windows()
     runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
     log = runtime / f"bonsai-launch-{os.getpid()}.log"
     try:
@@ -1025,9 +1040,15 @@ def start_program(argv):
     if code is None:
         # Remembered so input can be aimed at its window later, and only at its window.
         _launched[process.pid] = argv
-        return (f"Opened '{shown}' (pid {process.pid}) and it is still running, so its "
-                "window is up. It keeps running after this turn - do not open it again. "
-                "You can send it keys and clicks with PLAY once its window has focus.")
+        appeared = [name for address, name in open_windows().items()
+                    if address not in before_windows]
+        # Still running is not the same as showing something. Say which it is.
+        where = (f" Its window is up: {', '.join(appeared[:3])}." if appeared else
+                 " No window has appeared yet - it may still be starting, or it may be "
+                 "a program that does not open one.")
+        return (f"Opened '{shown}' (pid {process.pid}) and it is still running.{where}"
+                " It keeps running after this turn - do not open it again. You can send "
+                "it keys and clicks with PLAY once its window has focus.")
 
     printed = ""
     if log is not None:
@@ -1036,9 +1057,19 @@ def start_program(argv):
         except OSError:
             printed = ""
     if code == 0:
-        return (f"'{shown}' started and exited immediately with code 0. That usually "
-                "means it handed the request to an instance that was already open, so "
-                "the window is there."
+        # It used to say "that usually means an instance was already open, so the
+        # window is there" - a guess, stated as fact, and duly repeated back as "the
+        # project is already open" when what had actually run was xdg-open on a folder.
+        # A launcher exiting 0 says nothing at all; the compositor can say something.
+        appeared = [name for address, name in open_windows().items()
+                    if address not in before_windows]
+        if appeared:
+            return (f"'{shown}' opened: {', '.join(appeared[:3])}."
+                    + (f"\n{printed}" if printed else ""))
+        return (f"'{shown}' ran and exited straight away (code 0), and no new window "
+                "appeared. For a launcher like xdg-open that is normal and says nothing "
+                "about what opened - it may have gone to a program that was already "
+                "running, or to nothing at all. Check before saying it is open."
                 + (f"\n{printed}" if printed else ""))
     return (f"[Failed: '{shown}' exited with code {code}.]"
             + (f"\n{printed}" if printed else " It printed nothing."))

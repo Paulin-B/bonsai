@@ -99,5 +99,41 @@ finally:
         if value is not None:
             os.environ[key] = value
 
+print("\n-- what opened is looked up, not guessed at --")
+# Asked to open the Factory Sim project, a run launched xdg-open on a folder, and the
+# app replied "that usually means it handed the request to an instance that was already
+# open, so the window is there". The model repeated it as "the project is already open".
+# The app invented that; a launcher exiting 0 says nothing at all.
+seen = {"0xaaa": "codium - editor"}
+ga.shell.open_windows = lambda: dict(seen)
+
+class _Exited:
+    pid = 4242
+    def poll(self): return 0
+    def wait(self, timeout=None): return 0
+real_popen, real_session = ga.shell.subprocess.Popen, ga.shell.graphical_session
+ga.shell.graphical_session = lambda: True
+ga.shell.subprocess.Popen = lambda *a, **k: _Exited()
+try:
+    out = ga.start_program(["/usr/bin/xdg-open", "/media/D/Bonsai-Storage"])
+    check("it does not claim a window is there", "the window is there" in out, False)
+    check("it says no new window appeared", "no new window appeared" in out, True)
+    check("and that this proves nothing either way", "says nothing about what opened" in out, True)
+    check("telling it to check before claiming", "Check before saying it is open" in out, True)
+
+    # Now one that really does put a window up. The window has to be absent when the
+    # launch starts and present afterwards, or "appeared" means nothing.
+    calls = {"n": 0}
+    def windows_then():
+        calls["n"] += 1
+        return dict(seen) if calls["n"] == 1 else {**seen, "0xbbb": "godot - Factory Sim"}
+    ga.shell.open_windows = windows_then
+    out = ga.start_program(["/usr/bin/godot", "--path", "."])
+    check("a window that appeared is named", "godot - Factory Sim" in out, True)
+    check("and it says it opened", "' opened:" in out, True)
+finally:
+    ga.shell.subprocess.Popen, ga.shell.graphical_session = real_popen, real_session
+    ga.shell.open_windows = ga.shell.__dict__["open_windows"]
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
