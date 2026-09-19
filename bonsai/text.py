@@ -470,7 +470,7 @@ TASK_MUTATION_RE = re.compile(r"^TASK:\s*(ADD|DONE|REMOVE|CLEAR)", re.IGNORECASE
 
 # Filenames mentioned in a reply, used to spot files claimed but never touched.
 FILENAME_RE = re.compile(
-    r"\b([\w.-]+\.(?:gd|py|js|ts|json|md|txt|yml|yaml|sh|fish|c|cpp|h|rs|go|qml|html|css|zip))\b")
+    r"\b([\w.-]+\.(?:gd|py|js|ts|json|md|txt|yml|yaml|sh|fish|c|cpp|h|rs|go|qml|html|css|zip|png|jpg|jpeg|webp|svg|aseprite|tscn|tres|import|wav|ogg|ttf))\b")
 
 
 # Ways of stopping to ask permission that carry no question mark. Deliberately narrow:
@@ -547,6 +547,38 @@ def unverified_files(reply, trace):
     touched = {Path(n).name.lower() for n in FILENAME_RE.findall(trace or "")}
     mentioned = {Path(n).name for n in FILENAME_RE.findall(reply)}
     return sorted(n for n in mentioned if n.lower() not in touched)
+
+
+# Presenting something as seen, rather than as done. A reply that invents file names is
+# not claiming an action, so every action check let it through.
+CLAIMED_FINDING_RE = re.compile(
+    r"\b(?:i\s+(?:found|see|can see|located)\b"
+    r"|here (?:are|is) (?:the|a|some)\b"
+    r"|(?:it|the folder|the directory|the pack|the project)\s+contains\b"
+    r"|contains the following\b"
+    # "The `.png` files in the "Sprout Lands" folder are:" - whatever sits between the
+    # noun and the verb, it is still a claim about what is there.
+    r"|\b(?:files?|contents|images|sprites|scripts|assets)\b[^.\n]{0,60}?"
+    r"\b(?:are|is|include[sd]?)\b\s*:?)",
+    re.IGNORECASE)
+
+
+def invented_files(reply, trace, least=2):
+    """Filenames a reply presents as found when nothing this turn produced them.
+
+    Asked for the art in a folder, a turn listed six .png files by name - none of which
+    existed - having run one LIST_DIR of the folder above, which could not have shown
+    them. That is a fabricated tool result written as prose, and the action checks all
+    passed it because finding something is not doing something.
+
+    `least` keeps a passing mention from raising an alarm: a listing is the shape being
+    caught, so several unseen names have to appear together."""
+    if not CLAIMED_FINDING_RE.search(plain_text(reply)):
+        return []
+    touched = {Path(n).name.lower() for n in FILENAME_RE.findall(trace or "")}
+    mentioned = {Path(n).name for n in FILENAME_RE.findall(reply)}
+    missing = sorted(n for n in mentioned if n.lower() not in touched)
+    return missing if len(missing) >= least else []
 
 
 def denoise(text):

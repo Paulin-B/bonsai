@@ -120,5 +120,36 @@ for said in [
 ]:
     check(f"allowed: {said[:52]}", flagged(said), False)
 
+print("\n-- a listing of files that were never looked at --")
+# Asked to integrate a sprite pack, a turn listed ten .png files by name. None existed:
+# the real ones are "Basic Charakter Actions.png" and the like. It had run one LIST_DIR
+# of the folder ABOVE, which could not have shown them. Every action check passed it,
+# because finding something is not doing something.
+shallow = "LIST_DIR: /media/D/Bonsai-Storage -> Contents of /media/D/Bonsai-Storage (one level deep)"
+invented = ('The `.png` files in the "Sprout Lands - Sprites - Basic pack/" folder are:\n'
+            "- Character_Idle.png\n- Character_Walk.png\n- Tree_01.png\n- Tree_02.png\n")
+found = ga.invented_files(invented, shallow)
+check("the invented names are caught", len(found) >= 4, True)
+check("named individually", "Character_Idle.png" in found, True)
+check("and image files are recognised at all",
+      bool(ga.FILENAME_RE.search("Character_Idle.png")), True)
+
+print("\n-- but a listing the tools really produced is fine --")
+real = ("LIST_DIR: /pack/Characters -> Basic Charakter Actions.png, Tools.png, "
+        "Egg_And_Nest.png")
+check("names that came back from a tool are not invented",
+      ga.invented_files("I found the files: Basic Charakter Actions.png, Tools.png, "
+                        "Egg_And_Nest.png.", real), [])
+for label, reply, trace in [
+    ("no claim of finding anything", "I will copy the sheet into assets/ next.", ""),
+    ("a single incidental mention", "I found the issue - item_data.gd needs the atlas.", ""),
+    ("a question", "Which of the two packs should I use?", ""),
+    ("saying it is NOT there yet", "The sprites are not imported yet; I need to run Godot.", ""),
+    ("code using a path a tool touched",
+     'Use load("res://assets/automation/automation_spritesheet.png").',
+     "FILE_OP: COPY -> automation_spritesheet.png"),
+]:
+    check(f"quiet: {label}", ga.invented_files(reply, trace), [])
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
