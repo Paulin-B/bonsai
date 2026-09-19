@@ -77,6 +77,24 @@ def download_file(raw):
     return f"Downloaded {written} bytes to '{dest}'."
 
 
+# Flags that tell a desktop program not to open a window. With one of these it is an
+# ordinary command that runs and exits, which is the only way to reach the parts of a
+# program worth automating: importing a project, running a headless test, printing a
+# version. Refusing these made asset import impossible - the refusal named LAUNCH
+# instead, which opens a window and captures nothing.
+HEADLESS_FLAGS = {
+    "--headless", "-headless", "--no-window", "--background", "-b", "--batch",
+    "--version", "-version", "--help", "-h", "--check-only", "--quit", "--script",
+    "--dump-gdextension-interface", "--doctool",
+}
+
+
+def headless_invocation(argv):
+    """Whether this invocation of a windowed program asks it not to open a window."""
+    return any(token in HEADLESS_FLAGS or token.startswith("--export")
+               for token in argv[1:])
+
+
 def classify_command(raw, background=False):
     """Returns (argv, working_dir, verdict) where verdict is 'allowed', 'ask' or an
     error string. Commands are never run through a shell, so pipes, redirects and
@@ -104,7 +122,7 @@ def classify_command(raw, background=False):
         return None, None, (f"[Refused: '{program}' is never allowed from here. Use the "
                             "FILE_OP and DOWNLOAD tools for file and network operations.]")
     if (not background and program not in ALLOWED_COMMANDS
-            and program in desktop_programs()):
+            and program in desktop_programs() and not headless_invocation(argv)):
         return None, None, (f"[Refused: '{program}' is a desktop application. RUN waits for "
                             "the command to finish and hides the display from it, so this "
                             f"would hang until the timeout and then fail. Use LAUNCH: "

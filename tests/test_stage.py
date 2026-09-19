@@ -135,16 +135,30 @@ check("with modifiers cleared, so a held shift cannot leak in",
       "--clearmodifiers" in ran[-1], True)
 ga.handle_stage("TYPE hello")
 check("typing", ran[-1][:2], ["xdotool", "type"])
+# Nothing places windows inside a nested display, so a program centres itself where it
+# likes: a game window at (313, 146) meant every click on a "screen position" landed on
+# the empty root behind it. Coordinates are the window's own now, which is also what
+# the game reports back when it receives them.
+ga.stage.stage_window = lambda: ("4242", 313, 146, 640, 400)
+ga.stage._pointer_at = lambda: (313 + 40, 146 + 90)
 ga.handle_stage("MOVE 40 90")
-check("a move is to a position on the stage, not a movement",
-      ran[-1], ["xdotool", "mousemove", "--sync", "40", "90"])
+check("a move is offset by where the window actually is",
+      ran[-1], ["xdotool", "mousemove", "--sync", "353", "236"])
+check("outside the window is refused, with its real size",
+      "640x400" in ga.handle_stage("MOVE 9999 10"), True)
 ran.clear()
 ga.handle_stage("CLICK left 40 90")
 check("a click can carry where to click", ran[0][:3], ["xdotool", "mousemove", "--sync"])
-check("and then clicks the left button", ran[1], ["xdotool", "click", "1"])
+check("and then clicks the left button", ran[-1], ["xdotool", "click", "1"])
 ran.clear()
 ga.handle_stage("CLICK right")
 check("right is button 3", ran[-1], ["xdotool", "click", "3"])
+ga.stage._pointer_at = lambda: (10, 10)          # pointer off the window entirely
+ran.clear()
+check("clicking with the pointer off the window is refused",
+      "empty desktop behind it" in ga.handle_stage("CLICK left"), True)
+check("and nothing was clicked", ran, [])
+ga.stage._pointer_at = lambda: (313 + 40, 146 + 90)
 check("an unknown button is refused", "Unknown button" in ga.handle_stage("CLICK up"), True)
 ran.clear()
 ga.handle_stage("HOLD Right 30")

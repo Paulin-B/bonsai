@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-18-copiedclaims"
+APP_VERSION = "2026-09-19-headless"
 
 
 # Where the repo lives, for the optional files that ship beside it.

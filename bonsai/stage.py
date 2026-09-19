@@ -218,6 +218,7 @@ def start_stage(raw, visible=True, size="1280x720"):
         return (f"Ran {' '.join(argv)} on {display} and it finished (exit code 0).\n"
                 + (f"{printed}\n" if printed else "It printed nothing.\n")
                 + "The stage is still open - STAGE: STOP when you are done with it.")
+    focus_stage_window()
     seen = stage_windows()
     return (f"Stage open on {display}"
             + (" (a window you can watch)" if visible else " (nothing to see)")
@@ -254,6 +255,48 @@ def stage_windows():
         return []
 
 
+def stage_window():
+    """The program's window on the stage: (id, x, y, width, height), or None.
+
+    Nothing inside a nested display places windows - there is no window manager in
+    there - so a program centres itself wherever it likes. The first version of this
+    took MOVE and CLICK as positions on the SCREEN, and a game window sitting at
+    (313, 146) meant every click went to the empty root behind it."""
+    if _stage is None or not _stage.alive() or not shutil.which("xdotool"):
+        return None
+    try:
+        found = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "."],
+                               env=_stage.env, capture_output=True, text=True, timeout=4)
+        ids = (found.stdout or "").split()
+        if not ids:
+            return None
+        window = ids[0]
+        told = subprocess.run(["xdotool", "getwindowgeometry", "--shell", window],
+                              env=_stage.env, capture_output=True, text=True, timeout=4)
+        values = {}
+        for line in (told.stdout or "").splitlines():
+            key, _, value = line.partition("=")
+            if value.strip().lstrip("-").isdigit():
+                values[key.strip()] = int(value)
+        if not {"X", "Y", "WIDTH", "HEIGHT"} <= set(values):
+            return None
+        return (window, values["X"], values["Y"], values["WIDTH"], values["HEIGHT"])
+    except Exception:
+        return None
+
+
+def focus_stage_window():
+    """Point the nested display's keyboard at the program.
+
+    Without a window manager there is no input focus, so X falls back to sending keys
+    to whatever is under the pointer - which means moving the mouse off the window
+    silently stops the keyboard working too."""
+    window = stage_window()
+    if window is None:
+        return False
+    return _xdotool(["windowfocus", window[0]]) == ""
+
+
 def stage_look():
     """A picture of the stage, for the vision slot. Returns (note, frame or None)."""
     if _stage is None or not _stage.alive():
@@ -281,6 +324,49 @@ def stage_look():
     return (f"Looking at the stage on {_stage.display} - {_stage.status()}"
             + (f", showing: {', '.join(windows[:4])}" if windows else "")
             + ".", frame)
+
+
+def _pointer_at():
+    """Where the pointer is on the stage, in screen coordinates."""
+    if _stage is None:
+        return None
+    try:
+        told = subprocess.run(["xdotool", "getmouselocation", "--shell"],
+                              env=_stage.env, capture_output=True, text=True, timeout=4)
+        spot = {}
+        for line in (told.stdout or "").splitlines():
+            key, _, value = line.partition("=")
+            if value.strip().lstrip("-").isdigit():
+                spot[key.strip()] = int(value)
+        return (spot["X"], spot["Y"]) if {"X", "Y"} <= set(spot) else None
+    except Exception:
+        return None
+
+
+def _point_at(parts):
+    """Put the pointer at a spot inside the program's window, and say where it landed."""
+    try:
+        x, y = int(parts[0]), int(parts[1])
+    except ValueError:
+        return "[MOVE needs two whole numbers.]"
+    where = stage_window()
+    if where is None:
+        return ("[The program has no window on the stage yet, so there is nothing to "
+                "point at. STAGE: LOOK to see what is there.]")
+    _, left, top, width, height = where
+    if not (0 <= x < width and 0 <= y < height):
+        return (f"[({x}, {y}) is outside the window, which is {width}x{height}. "
+                "Coordinates are measured from the window's top-left corner.]")
+    failed = _xdotool(["mousemove", "--sync", str(left + x), str(top + y)])
+    if failed:
+        return failed
+    at = _pointer_at()
+    if at is None:
+        return f"Pointer moved to ({x}, {y}) in the window."
+    landed = (at[0] - left, at[1] - top)
+    if abs(landed[0] - x) + abs(landed[1] - y) > 2:
+        return f"[The pointer ended up at {landed}, not ({x}, {y}).]"
+    return f"Pointer is at ({x}, {y}) inside the program's window."
 
 
 def _xdotool(args):
@@ -371,12 +457,12 @@ def handle_stage(raw):
         return _xdotool(["type", "--clearmodifiers", rest]) or \
             f"Typed {len(rest)} character(s) on the stage."
 
-    if action == "MOVE":
+    if action in ("MOVE", "POINT"):
         parts = rest.split()
         if len(parts) != 2:
-            return "[STAGE: MOVE <x> <y> - a position on the stage, from its top-left.]"
-        return _xdotool(["mousemove", "--sync", parts[0], parts[1]]) or \
-            f"Pointer moved to ({parts[0]}, {parts[1]}) on the stage."
+            return ("[STAGE: MOVE <x> <y> - where inside the program's window to put "
+                    "the pointer, measured from its top-left corner.]")
+        return _point_at(parts)
 
     if action == "CLICK":
         buttons = {"left": "1", "middle": "2", "right": "3"}
@@ -385,9 +471,17 @@ def handle_stage(raw):
         if button not in buttons:
             return f"[Unknown button '{button}'. Use left, right or middle.]"
         if len(parts) == 3:
-            failed = _xdotool(["mousemove", "--sync", parts[1], parts[2]])
-            if failed:
-                return failed
+            moved = _point_at(parts[1:3])
+            if moved.startswith("["):
+                return moved
+        where = stage_window()
+        if where is not None:
+            at = _pointer_at()
+            _, left, top, width, height = where
+            if at and not (left <= at[0] < left + width and top <= at[1] < top + height):
+                return ("[Refused: the pointer is not over the program's window, so this "
+                        "would click the empty desktop behind it. Put it inside with "
+                        "STAGE: MOVE <x> <y> first - those are window coordinates.]")
         return _xdotool(["click", buttons[button]]) or f"Clicked {button} on the stage."
 
     return ("[STAGE needs START, LOOK, KEY, HOLD, TYPE, MOVE, CLICK, WINDOWS, OUTPUT, "

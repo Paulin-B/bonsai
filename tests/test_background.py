@@ -170,5 +170,30 @@ try:
 finally:
     ga.stop_all_background()
 
+print("\n-- a windowed program asked not to open a window is an ordinary command --")
+# This was the whole reason asset import never happened: RUN refused "godot" outright
+# as a desktop application, even with --headless, and told it to LAUNCH instead - which
+# opens a window and captures nothing. Importing a Godot project, running a headless
+# test or printing a version were all unreachable.
+desktop = next((p for p in ga.desktop_programs() if p not in ga.ALLOWED_COMMANDS), None)
+if desktop:
+    _, _, plain = ga.classify_command(f"{desktop} | {work}")
+    check(f"a bare {desktop!r} is still refused", "desktop application" in str(plain), True)
+    _, _, quiet = ga.classify_command(f"{desktop} --headless --quit | {work}")
+    check("but --headless is allowed through", "desktop application" in str(quiet), False)
+    _, _, version = ga.classify_command(f"{desktop} --version | {work}")
+    check("and so is --version", "desktop application" in str(version), False)
+else:
+    for _ in range(3):
+        check("no desktop program installed to test with - skipped", True, True)
+
+check("--headless counts", ga.headless_invocation(["godot", "--headless", "--path", "."]), True)
+check("--background counts, for blender and friends",
+      ga.headless_invocation(["blender", "--background", "x.blend"]), True)
+check("an export counts", ga.headless_invocation(["godot", "--export-release", "linux"]), True)
+check("but a bare invocation does not", ga.headless_invocation(["godot"]), False)
+check("nor one that only names a project",
+      ga.headless_invocation(["godot", "--path", "."]), False)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
