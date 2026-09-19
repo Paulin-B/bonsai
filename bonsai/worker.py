@@ -17,7 +17,7 @@ from .store import (
     all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, unreachable_server,
 )
 from .text import (
-    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -522,6 +522,7 @@ class Worker(QThread):
             # Each nudge fires at most once per turn, so none of them can loop.
             corrected = pressed = reminded = searched = recalled = False
             prodded = False
+            echoed_self = False
             unattended = self.config.get("unattended", False)
             exhausted = True
             ran_out = ""        # "steps" or "context" - why the turn ended early
@@ -579,6 +580,20 @@ class Worker(QThread):
                             "MKDIR them. Stop only if you are truly blocked, and then name "
                             "the one thing blocking you.]")
                         self.status.emit("Pushing past a stalled turn...")
+                        continue
+                    if not echoed_self and same_as_last_time(reply, self.history):
+                        # Saying the same paragraph again is not an answer, whoever is
+                        # watching. The user had already said "no you didn't" twice.
+                        echoed_self = True
+                        prompt = (
+                            f"{prompt}\n\n[That is word for word what you said last "
+                            "turn, so nothing has moved. Repeating it again will not "
+                            "help. Either do the thing that was asked with your tools "
+                            "in THIS turn - writing or changing a file, not describing "
+                            "one - or say plainly which single thing is stopping you. "
+                            "If you believe it is already done, prove it by reading "
+                            "back the part of the file that shows it.]")
+                        self.status.emit("Breaking a repeated reply...")
                         continue
                     if not prodded and not trace and DENIES_TOOL_RE.search(plain_text(reply)):
                         # It said it could not, without trying. The tools were listed in

@@ -252,6 +252,24 @@ def strip_record_echo(reply):
     return RECORD_ECHO_RE.sub("", ACTIONS_ECHO_RE.sub("", reply).strip()).strip()
 
 
+def same_as_last_time(reply, history):
+    """Whether this reply says what the last one said, word for word.
+
+    Watched across a whole conversation: told "Integrate them", it wrote a comment
+    saying the sprites should be used, and then repeated that same paragraph four
+    times while being told "no you didn't" and "yes do the actual sprite sheets". A
+    reply identical to the one before it is not an answer - the turn has stopped
+    moving, and nothing in the app noticed because each turn looked fine on its own."""
+    said = plain_text(reply or "").strip()
+    if len(said) < 40:
+        return False        # "Done." twice is not a stuck conversation
+    for message in reversed(history or []):
+        if message.get("role") != "assistant":
+            continue
+        return plain_text(message.get("content") or "").strip() == said
+    return False
+
+
 def blocked_as_repeat(name, repeats, last_failed):
     """Whether a tool call should be refused for being an exact repeat.
 
@@ -455,6 +473,19 @@ FILENAME_RE = re.compile(
     r"\b([\w.-]+\.(?:gd|py|js|ts|json|md|txt|yml|yaml|sh|fish|c|cpp|h|rs|go|qml|html|css|zip))\b")
 
 
+# Ways of stopping to ask permission that carry no question mark. Deliberately narrow:
+# each one has to be an offer to do something, not a courtesy at the end of finished
+# work ("let me know if you need anything else" says the work is done).
+OFFER_RE = re.compile(
+    r"\b(?:let me know (?:if|when|whether) you(?:'d| would)? (?:like|want|prefer)"
+    r"(?: me)? to\b"
+    r"|would you like me to\b|do you want me to\b|shall i\b|should i\b"
+    r"|say the word and i(?:'ll| will)\b"
+    r"|i can (?:go ahead and )?(?:do|start|proceed|implement|integrate|add) (?:that|this|it|them)"
+    r"\s+(?:if|once|when) you\b)",
+    re.IGNORECASE)
+
+
 def awaits_an_answer(text, window=6):
     """True when the reply's closing lines put a question to the user.
 
@@ -463,7 +494,13 @@ def awaits_an_answer(text, window=6):
     the final sentence. Unattended, any of these is a round spent waiting for an answer
     nobody is going to give."""
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    return any(line.rstrip("*_`> ").endswith("?") for line in lines[-window:])
+    closing = lines[-window:]
+    if any(line.rstrip("*_`> ").endswith("?") for line in closing):
+        return True
+    # An offer is a question without the question mark. "Let me know when you'd like me
+    # to integrate them" ended five replies in a row, each one after being told to do
+    # exactly that, and none of them counted as waiting for anybody.
+    return bool(OFFER_RE.search(" ".join(closing)))
 
 
 def render_results(entries, budget):

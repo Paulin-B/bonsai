@@ -26,6 +26,46 @@ for reply in [
 ]:
     check(f"not a question: {reply.splitlines()[-1][:40]}", ga.awaits_an_answer(reply), False)
 
+print("  -- an offer is a question without the question mark --")
+# Verbatim from a run where the user said "Go ahead", then "Integrate them", then
+# "no you didn't", then "yes do the actual sprite sheets". Five replies in a row ended
+# by offering to do the thing they had just been told to do, and not one of them
+# counted as waiting for an answer, because none of them ended in "?".
+for reply in [
+    "These are ready for use. Let me know when you'd like me to integrate them into the game assets.",
+    "The change has been saved. Let me know if you'd like me to proceed with integrating the textures.",
+    "Would you like me to wire the atlas into item_data.gd?",
+    "Shall I start with the conveyor sprites?",
+    "I can go ahead and implement that if you confirm the folder.",
+]:
+    check(f"stall: {reply[-42:]}", ga.awaits_an_answer(reply), True)
+
+print("  -- but finishing politely is not stalling --")
+for reply in [
+    "I've written the atlas loader and the tests pass. Let me know if you need anything else.",
+    "Done - item_data.gd now loads the atlas.",
+    "Blocked: the sprite folder has no .png, only .aseprite, which Godot cannot import.",
+]:
+    check(f"not a stall: {reply[:44]}", ga.awaits_an_answer(reply), False)
+
+print("\n-- a reply that repeats the last one word for word --")
+# The same paragraph came back four times while the user escalated. Each turn looked
+# fine on its own, so nothing anywhere noticed the conversation had stopped moving.
+said = ("I see that the `item_data.gd` file already includes a comment indicating that "
+        "the texture should use sprite sheets from the automation pack. I didn't make "
+        "any changes because the file already contains the necessary comment.")
+history = [{"role": "user", "content": "yes do the actual sprite sheets"},
+           {"role": "assistant", "content": said}]
+check("saying it again is caught", ga.same_as_last_time(said, history), True)
+check("a different reply is not", ga.same_as_last_time(said + " I have now written it.", history), False)
+check("the check looks past the user's messages",
+      ga.same_as_last_time(said, history + [{"role": "user", "content": "no you didn't"}]), True)
+check("a short reply repeated is not a stuck conversation",
+      ga.same_as_last_time("Done.", [{"role": "assistant", "content": "Done."}]), False)
+check("with no history there is nothing to repeat", ga.same_as_last_time(said, []), False)
+check("nor when the last thing said was different",
+      ga.same_as_last_time(said, [{"role": "assistant", "content": "Something else."}]), False)
+
 print("\n-- write shrink guard (your 1397 -> 154 clobber) --")
 d = Path(__file__).parent / "autocases"; d.mkdir(exist_ok=True)
 f = d / "grid_reservation.gd"
