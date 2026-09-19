@@ -128,5 +128,69 @@ exact.write_text("x = 1\ny = 2\n")
 r = ga.do_edit(str(exact), "x = 1\n|||\nx = 9\n")
 check("an exact match says nothing about indentation", "did not match exactly" in r, False)
 
+print("\n-- an edit whose whole point is the indentation --")
+# From a real run, twice. A block was left indented into a GDScript class body, and
+# every attempt to de-indent it came back "Edited" with the file unchanged: the text
+# to find had been typed at the wrong indent, matched after a shift, and the
+# replacement was shifted with it - putting the old indentation straight back.
+CORRUPT = ("extends Node2D\n\nvar buffer: Array[String] = []\n"
+           "\tvar hunger_bar: float = 1.0\n"
+           "\tvar hunger_decay_rate: float = 0.01\n"
+           "var is_producing: bool = false\n")
+
+def attempt(old, new):
+    target = _box / "mother_machine.gd"
+    target.write_text(CORRUPT)
+    said = ga.do_edit(str(target), f"{old}{ga.EDIT_SEP}{new}")
+    return said, target.read_text()
+
+said, after = attempt("\tvar hunger_bar: float = 1.0", "var hunger_bar: float = 1.0")
+check("the exact text de-indents the line", "\tvar hunger_bar" in after, False)
+check("and it says it edited", said.startswith("Edited "), True)
+
+said, after = attempt("    var hunger_bar: float = 1.0\n    var hunger_decay_rate: float = 0.01",
+                      "var hunger_bar: float = 1.0\nvar hunger_decay_rate: float = 0.01")
+check("spaces where the file has a tab still finds it", "\tvar hunger_bar" in after, False)
+check("and the de-indent is what lands", "\nvar hunger_bar: float = 1.0\n" in after, True)
+check("reported as an edit", said.startswith("Edited "), True)
+
+print("\n-- and one that cannot mean anything is not called an edit --")
+said, after = attempt("var hunger_bar: float = 1.0", "var hunger_bar: float = 1.0")
+check("nothing was written", after, CORRUPT)
+check("and it does NOT claim to have edited", said.startswith("Edited "), False)
+check("it says nothing changed", said.startswith("[Nothing changed"), True)
+check("naming the line", "line 4" in said, True)
+check("and what that line's indentation actually is", "1 tab(s)" in said, True)
+check("with what to do instead", "exactly as the file has it" in said, True)
+
+print("\n-- ordinary edits are untouched by any of this --")
+target = _box / "plain.gd"
+target.write_text("extends Node\n\nfunc go():\n\tvar total = 1\n\treturn total\n")
+said = ga.do_edit(str(target), f"var total = 1{ga.EDIT_SEP}var total = 42")
+check("a needle missing its indent still matches", said.startswith("Edited "), True)
+check("and the replacement keeps the file's indentation",
+      "\tvar total = 42" in target.read_text(), True)
+check("the rest of the file is untouched",
+      "\treturn total" in target.read_text(), True)
+
+target.write_text("a = 1\nb = 2\na = 1\n")
+said = ga.do_edit(str(target), f"a = 1{ga.EDIT_SEP}a = 99")
+check("an ambiguous match is still refused", said.startswith("[Found 2 matches"), True)
+check("and nothing was written", target.read_text(), "a = 1\nb = 2\na = 1\n")
+
+print("\n-- the parts that decide it --")
+check("same text, different indent, is a re-indent",
+      ga.reindents("\tvar x = 1", "var x = 1"), True)
+check("same text and same indent is not",
+      ga.reindents("\tvar x = 1", "\tvar y = 1"), False)
+check("different text is not, however it is indented",
+      ga.reindents("\tvar x = 1", "var y = 2"), False)
+check("an indent-blind match returns the file's own text",
+      ga.indent_blind_match("a\n\tvar x = 1\nb\n", "var x = 1"), "\tvar x = 1")
+check("but not when two blocks match",
+      ga.indent_blind_match("\tvar x = 1\n  var x = 1\n", "var x = 1"), None)
+check("and not when none do",
+      ga.indent_blind_match("a\nb\n", "var x = 1"), None)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

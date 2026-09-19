@@ -883,25 +883,72 @@ def _reindent(text, removed, added):
         else line for line in lines)
 
 
+def _indent_of(line):
+    return line[:len(line) - len(line.lstrip(" \t"))]
+
+
+def reindents(needle, replacement):
+    """Whether this edit is ITSELF about indentation: same text, different leading
+    whitespace.
+
+    It decides whether a near-miss may shift the replacement along with the text it
+    matched. Shifting both is right when the model simply mistyped the indent and meant
+    to leave it alone. It is exactly wrong when the indent is the thing being fixed -
+    the shift put the old indentation back, the tool reported "Edited", and the file was
+    unchanged. Re-reading showed the same broken line, so the same edit was tried
+    again."""
+    kept = [line for line in needle.splitlines() if line.strip()]
+    into = [line for line in replacement.splitlines() if line.strip()]
+    if not kept or len(kept) != len(into):
+        return False
+    return (all(a.strip() == b.strip() for a, b in zip(kept, into))
+            and any(_indent_of(a) != _indent_of(b) for a, b in zip(kept, into)))
+
+
+def indent_blind_match(original, needle):
+    """The file's own text for the one block matching `needle` but for indentation.
+
+    Last resort, and only when it is unambiguous: a single block whose lines match
+    once whitespace is set aside. Returning the file's literal text means the edit is
+    still applied to something that really is in the file."""
+    want = [line.strip() for line in needle.split("\n")]
+    while want and not want[-1]:
+        want.pop()
+    if not want or not any(want):
+        return None
+    lines = original.split("\n")
+    hits = [start for start in range(len(lines) - len(want) + 1)
+            if [line.strip() for line in lines[start:start + len(want)]] == want]
+    return "\n".join(lines[hits[0]:hits[0] + len(want)]) if len(hits) == 1 else None
+
+
 def whitespace_variants(needle, replacement):
     """Near-misses of `needle` that differ only in leading indentation.
 
-    Yields (needle, replacement) pairs with the same shift applied to both, so a
-    replacement never lands at a different indent from the text it replaces."""
+    The same shift is applied to the replacement, so it never lands at a different
+    indent from the text it replaced - unless the edit is about the indentation, in
+    which case the replacement is left exactly as it was written."""
+    changing_indent = reindents(needle, replacement)
+
+    def pair(from_indent, to_indent):
+        return (_reindent(needle, from_indent, to_indent),
+                replacement if changing_indent
+                else _reindent(replacement, from_indent, to_indent))
+
     first = needle.split("\n", 1)[0]
-    indent = first[:len(first) - len(first.lstrip(" \t"))]
+    indent = _indent_of(first)
     if indent:
-        # The indent the model supplied is wrong - try without it, and try it as one
-        # level less, which is what an off-by-one ' | ' delimiter looks like.
-        yield _reindent(needle, indent, ""), _reindent(replacement, indent, "")
-        for trimmed in (indent[1:], indent[:-1]):
-            if trimmed != indent:
-                yield (_reindent(needle, indent, trimmed),
-                       _reindent(replacement, indent, trimmed))
+        # The indent the model supplied is wrong - try without it, try it as one level
+        # less (what an off-by-one ' | ' delimiter looks like), and try the other
+        # character entirely, since a tab and four spaces look identical on screen.
+        yield pair(indent, "")
+        for other in (indent[1:], indent[:-1], "\t", "\t\t", "    ", "        ", "  "):
+            if other != indent:
+                yield pair(indent, other)
     else:
         # Or the model dropped indentation the file actually has.
-        for guess in ("    ", "\t", "  ", "        "):
-            yield _reindent(needle, "", guess), _reindent(replacement, "", guess)
+        for guess in ("    ", "\t", "  ", "        ", "\t\t"):
+            yield pair("", guess)
 
 
 def do_edit(raw, payload):
@@ -960,6 +1007,17 @@ def do_edit(raw, payload):
                 found = 1
                 break
     if found == 0:
+        # Nothing shifted into place, so look for the block ignoring indentation
+        # altogether and edit the file's own text for it - but only if exactly one
+        # block matches, or this would be a guess about where to write.
+        literal = indent_blind_match(original, needle)
+        if literal is not None and original.count(literal) == 1:
+            needle = literal
+            if not reindents(old_text, new_text):
+                replacement = _reindent(replacement, _indent_of(replacement.split("\n", 1)[0]),
+                                        _indent_of(literal.split("\n", 1)[0]))
+            found = 1
+    if found == 0:
         body = [line for line in old_text.splitlines() if line.strip()]
         if body and all(NUMBERED_LINE_RE.match(line) for line in body):
             return (f"[No match in {path.name}: the text to find still has READ_FILE's line "
@@ -974,10 +1032,29 @@ def do_edit(raw, payload):
                 "exactly once.]")
 
     line_no = original[:original.index(needle)].count("\n") + 1
+    updated = original.replace(needle, replacement, 1)
+    if updated == original:
+        # An edit that changes nothing is not an edit. This happens when the text to
+        # find was typed at a different indentation from the file's, matched after a
+        # shift, and the replacement was shifted with it - putting back exactly what
+        # was there. Reporting "Edited" then sent the model round again on a file it
+        # had been told was fixed, which is how a turn burns itself out.
+        # Read off the file, not off the text that was sent: what the file actually
+        # uses is the thing the next attempt needs to know.
+        in_file = original.split("\n")[line_no - 1]
+        indent = _indent_of(in_file)
+        looks = ("no indentation" if not indent else
+                 f"{indent.count(chr(9))} tab(s)" if "\t" in indent else
+                 f"{len(indent)} space(s)")
+        return (f"[Nothing changed in {path.name}. The replacement is identical to what "
+                f"is already at line {line_no}, so the file is as it was. That line has "
+                f"{looks}. If the indentation is what you are changing, send "
+                "the old text exactly as the file has it and the new text with the "
+                "indentation you want - they must differ, or there is nothing to do.]")
     backup = _backup(path)
     try:
         with open(path, "w", encoding="utf-8", newline="") as handle:
-            handle.write(original.replace(needle, replacement, 1))
+            handle.write(updated)
     except Exception as exc:
         return f"[Edit failed: {exc}]"
     note = f" Previous version backed up to '{backup}'." if backup else ""
