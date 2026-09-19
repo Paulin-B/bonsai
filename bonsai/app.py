@@ -367,14 +367,45 @@ class MessageList(QScrollArea):
         self.column.addStretch(1)
         self.setWidget(body)
 
-    def _append(self, widget):
+        # Following the end is a state, not an action. Scrolling once on append landed
+        # on the maximum as it was BEFORE the new block had been measured, so the view
+        # sat one message behind and a long reply arrived mostly below the fold. The
+        # scrollbar says when its range has actually changed; that is the moment to move.
+        self.following = True
+        bar = self.verticalScrollBar()
+        bar.rangeChanged.connect(self._range_changed)
+        bar.valueChanged.connect(self._value_changed)
+
+    # Within this many pixels of the bottom still counts as being at the bottom: a
+    # rounding difference should not be read as "they have scrolled away to read".
+    FOLLOW_SLACK = 24
+
+    def _value_changed(self, value):
+        bar = self.verticalScrollBar()
+        self.following = value >= bar.maximum() - self.FOLLOW_SLACK
+
+    def _range_changed(self, _minimum, maximum):
+        if self.following:
+            self.verticalScrollBar().setValue(maximum)
+
+    def _append(self, widget, follow=False):
+        if follow:
+            self.following = True
         self.column.insertWidget(self.column.count() - 1, widget)
-        # After layout settles, not before, or the scrollbar maximum is still stale.
-        QTimer.singleShot(0, self.scroll_to_end)
+        # The range change does the scrolling; this catches the case where the new
+        # widget fits without changing the range at all.
+        QTimer.singleShot(0, self.keep_up)
+
+    def keep_up(self):
+        """Move to the end if we were already there. What streaming and new messages
+        use, so reading back through the transcript is not interrupted."""
+        if self.following:
+            self.scroll_to_end()
 
     def scroll_to_end(self):
         bar = self.verticalScrollBar()
         bar.setValue(bar.maximum())
+        self.following = True
 
     def clear(self):
         while self.column.count() > 1:
@@ -391,7 +422,8 @@ class MessageList(QScrollArea):
         row = UserMessage(text, index=index, retry=retry)
         row.branch.connect(self.branch_here)
         row.edited.connect(self.edit_here)
-        self._append(row)
+        # Your own message always brings the view back down: you just sent it.
+        self._append(row, follow=True)
 
     def add_assistant(self, text, name="Bonsai", unprompted=False):
         block = QFrame()
@@ -1756,7 +1788,7 @@ class Bonsai(QWidget):
         if self.stream_view is None:
             return
         self.stream_view.set_markdown(self.stream_text)
-        self.messages.scroll_to_end()
+        self.messages.keep_up()
 
     def end_stream(self):
         """Drop the live view; the finished reply is added by on_reply, after the

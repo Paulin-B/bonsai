@@ -132,5 +132,60 @@ check("and the box is tall enough to show them at once",
       >= dialog.endpoints_editor.fontMetrics().lineSpacing() * 3, True)
 dialog.close()
 
+print("\n-- the transcript keeps up with what is added to it --")
+# It used to scroll on append, which read the scrollbar maximum as it was BEFORE the
+# new block had been measured - so the view sat one message behind and a long reply
+# arrived mostly below the fold. Measured from the real scrollbar, not from the call.
+feed = ga.MessageList(ga.THEMES["dark"])
+feed.resize(700, 400)
+feed.show()
+settle(8)
+bar = feed.verticalScrollBar()
+long_reply = "\n\n".join(f"Paragraph {i}. " + "word " * 60 for i in range(12))
+
+def at_end():
+    return bar.value() >= bar.maximum()
+
+feed.add_note("ran READ_FILE")
+settle(8)
+check("a short note leaves it at the end", at_end(), True)
+feed.add_assistant(long_reply)
+settle(8)
+check("a reply taller than the window still lands at the end", at_end(), True)
+check("and there is something to scroll", bar.maximum() > 0, True)
+feed.add_assistant(long_reply)
+settle(8)
+check("and the next one too", at_end(), True)
+
+print("\n-- but it does not drag you away from what you are reading --")
+bar.setValue(200)
+settle(4)
+check("scrolling up stops it following", feed.following, False)
+feed.add_assistant(long_reply)
+settle(8)
+check("a reply arriving leaves you where you were", bar.value(), 200)
+feed.add_note("ran FIND")
+settle(8)
+check("so does a tool note", bar.value(), 200)
+
+feed.add_user("what about the belts?")
+settle(8)
+check("but your own message brings you back down", at_end(), True)
+check("because sending one means you want to see it", feed.following, True)
+
+bar.setValue(150)
+settle(4)
+check("scrolled away again", feed.following, False)
+bar.setValue(bar.maximum())
+settle(4)
+check("returning to the bottom resumes following", feed.following, True)
+feed.add_assistant(long_reply)
+settle(8)
+check("and the next reply keeps up", at_end(), True)
+
+check("a near-miss of the bottom still counts as following",
+      (bar.setValue(bar.maximum() - 2), settle(2), feed.following)[2], True)
+feed.close()
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
