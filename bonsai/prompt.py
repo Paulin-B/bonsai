@@ -435,9 +435,9 @@ def build_tool_schemas(only=None):
               {"url": {"type": "string", "description": "Full http(s) URL."}}, ["url"]),
         _tool("download", "Download a file from the web to a path on disk.",
               {"url": {"type": "string"}, "destination": path}, ["url", "destination"]),
-        _tool("run", "Run one command. No shell, so no pipes, redirects or && - and "
-              "quotes are consumed when the command is split, so for anything involving "
-              "quoted strings write a script file first and run that. Commands run "
+        _tool("run", "Run one command. No shell, so no pipes, redirects or && - but "
+              "quoting works and is how you pass an argument containing spaces: "
+              "cp a.png \"/path with spaces/b.png\". Commands run "
               "sandboxed: the working folder is writable, everything else is read-only, "
               "credentials are hidden and there is no network. Good for running tests or "
               "a script to check your own work.",

@@ -95,6 +95,30 @@ def headless_invocation(argv):
                for token in argv[1:])
 
 
+def unquoted_path_with_spaces(argv):
+    """A path that came apart into several arguments because it was not quoted.
+
+    Reported only when rejoining the pieces names something real - a path that exists,
+    or one whose folder exists and which reaches deeper than the fragment did. That
+    second case is what an OUTPUT path looks like: the file is not there yet, but the
+    directory it is going into is, and the fragment stopped at the first space."""
+    def target(text):
+        return Path(text.split("=", 1)[-1])
+
+    for start in range(1, len(argv)):
+        piece = argv[start]
+        if "/" not in piece or target(piece).exists():
+            continue
+        depth = len(target(piece).parts)
+        joined = piece
+        for token in argv[start + 1:start + 10]:
+            joined = f"{joined} {token}"
+            whole = target(joined)
+            if whole.exists() or (len(whole.parts) > depth and whole.parent.is_dir()):
+                return joined
+    return None
+
+
 def classify_command(raw, background=False):
     """Returns (argv, working_dir, verdict) where verdict is 'allowed', 'ask' or an
     error string. Commands are never run through a shell, so pipes, redirects and
@@ -116,6 +140,17 @@ def classify_command(raw, background=False):
         return None, None, f"[Couldn't parse command: {exc}]"
     if not argv:
         return None, None, "[Refused: empty command.]"
+
+    split_path = unquoted_path_with_spaces(argv)
+    if split_path:
+        # A path with a space in it comes apart into several arguments, and the command
+        # then fails somewhere far from the cause. Watched for twenty minutes: every
+        # attempt on a folder called "Sprout Lands - Sprites - Basic pack" failed, and
+        # the quoting that would have fixed it is what the tool description had said
+        # does not work.
+        return None, None, (f"[Refused: '{split_path}' has spaces in it, so it came "
+                            "apart into separate arguments. Put quotes round it: "
+                            f'"{split_path}".]')
 
     program = Path(argv[0]).name.lower()
     if program in FORBIDDEN_COMMANDS:

@@ -195,5 +195,42 @@ check("but a bare invocation does not", ga.headless_invocation(["godot"]), False
 check("nor one that only names a project",
       ga.headless_invocation(["godot", "--path", "."]), False)
 
+print("\n-- a path with spaces that was not quoted --")
+# Watched for twenty minutes of real use: every attempt on a folder called
+# "Sprout Lands - Sprites - Basic pack" came apart into separate arguments and failed
+# somewhere far from the cause. Quoting fixes it - and the RUN description had said
+# quoting does not work, which is what sent it looking for other ways round.
+spaced = work / "Sprout Lands - Sprites"
+(spaced / "Characters").mkdir(parents=True, exist_ok=True)
+(spaced / "Characters" / "Tools.png").write_bytes(b"\x89PNG")
+
+_, _, verdict = ga.classify_command(
+    f"aseprite --batch --script-param out={spaced}/Characters/new --script /tmp/a.lua | {work}")
+check("an unquoted output path is caught", "has spaces in it" in str(verdict), True)
+check("and it shows the whole path put back together",
+      "Sprout Lands - Sprites/Characters/new" in str(verdict), True)
+check("with the fix spelled out", '"' in str(verdict), True)
+
+_, _, verdict = ga.classify_command(
+    f'cp "{spaced}/Characters/Tools.png" /tmp/t.png | {work}')
+check("quoted, it is allowed through", verdict in ("ask", "allowed"), True)
+argv, _, _ = ga.classify_command(f'cp "{spaced}/Characters/Tools.png" /tmp/t.png | {work}')
+check("and the path survives as one argument",
+      argv[1], f"{spaced}/Characters/Tools.png")
+
+print("\n-- and it does not cry wolf --")
+for label, cmd in [
+    ("a plain path", f"ls {work}"),
+    ("words that are not paths", "echo hello world"),
+    ("two files, neither with spaces", "cat /tmp/a.txt /tmp/b.txt"),
+    ("a missing file then a word", "cat /tmp/definitely-not-here.txt twice"),
+    ("a pattern then a real path", f"grep -rn pattern {work}"),
+]:
+    _, _, verdict = ga.classify_command(f"{cmd} | {work}")
+    check(f"quiet: {label}", "has spaces in it" in str(verdict), False)
+
+check("the helper finds nothing in a clean argv",
+      ga.unquoted_path_with_spaces(["ls", "-la", "/tmp"]), None)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
