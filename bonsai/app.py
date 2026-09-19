@@ -24,7 +24,7 @@ from .store import (
     available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
 )
 from .text import (
-    ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, RECORD_HEADER, TASK_MUTATION_RE, invented_files, invented_recall, is_record_echo, narrate_trace, plain_text, unsearched_memory, unverified_files,
+    ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, RECORD_HEADER, TASK_MUTATION_RE, invented_files, invented_recall, is_record_echo, narrate_trace, plain_text, same_as_last_time, unsearched_memory, unverified_files,
 )
 from .files import (
     read_file,
@@ -1852,6 +1852,14 @@ class Bonsai(QWidget):
         if not trace and CLAIMED_ACTION_RE.search(plain_text(reply)):
             self.log("\u26a0 It claims it did something, but no tool ran this turn - "
                      "nothing was actually changed on disk.", "orange")
+        if same_as_last_time(reply, self.history):
+            # The turn was already told mid-flight that it was repeating itself, and
+            # said it again regardless. Nothing in the app can make it work, but it can
+            # stop the repetition reading like a fresh answer.
+            self.log("\u26a0 That is word for word what it said last turn, so nothing "
+                     "moved. Tell it the single thing you want changed, or start a new "
+                     "chat - repeating the request tends to get the same paragraph.",
+                     "orange")
         made_up = invented_files(reply, trace)
         if made_up:
             self.log("\u26a0 It lists " + ", ".join(made_up[:5])

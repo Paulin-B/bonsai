@@ -113,7 +113,8 @@ DID_VERBS = (
     r"renamed|moved|downloaded|installed|fixed|swapped|updating|writing|replacing|"
     r"implemented|completed|finished|built|added|established|refactored|generated|"
     r"set up|put together|removed|cleared|closed|marked|integrated|wired|hooked up|"
-    r"imported|reviewed|inspected|examined"
+    r"imported|reviewed|inspected|examined|copied|copying|duplicated|exported|"
+    r"pulled in|brought in|dropped in|placed"
 )
 
 
@@ -558,8 +559,12 @@ CLAIMED_FINDING_RE = re.compile(
     r"|contains the following\b"
     # "The `.png` files in the "Sprout Lands" folder are:" - whatever sits between the
     # noun and the verb, it is still a claim about what is there.
-    r"|\b(?:files?|contents|images|sprites|scripts|assets)\b[^.\n]{0,60}?"
-    r"\b(?:are|is|include[sd]?)\b\s*:?)",
+    r"|\b(?:files?|contents|images?|sprites?|sheets?|textures?|scripts?|assets?|"
+    r"folders?|tilesets?)\b[^.\n]{0,60}?"
+    r"\b(?:are|is|include[sd]?|have been|has been|were|was)\b\s*:?"
+    # "The following sprite sheets have been imported into the Godot project:" is a
+    # list of what is there, whatever verb it hangs on.
+    r"|\bthe following\b[^.\n]{0,50}?\b(?:are|is|have been|has been|were|was)\b)",
     re.IGNORECASE)
 
 

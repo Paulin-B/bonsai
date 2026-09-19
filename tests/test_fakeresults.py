@@ -151,5 +151,24 @@ for label, reply, trace in [
 ]:
     check(f"quiet: {label}", ga.invented_files(reply, trace), [])
 
+print("\n-- the claims from the sprite run --")
+# A run that really did copy two files, then said it had copied all of them, then
+# listed files it had never seen as "imported". Each gap here was a word the checks
+# did not know.
+check("'copied' is an action claim at last",
+      bool(ga.CLAIMED_ACTION_RE.search("I've copied all the sprite sheets into the project.")),
+      True)
+check("so is 'imported'",
+      bool(ga.CLAIMED_ACTION_RE.search("The sheets have been imported into the project.")),
+      True)
+check("'the following ... have been imported' is a listing",
+      len(ga.invented_files(
+          "The following sprite sheets have been imported into the Godot project:\n"
+          "1. `assets/sprites/objects/Basic Object Actions.png`\n"
+          "2. `assets/sprites/objects/Basic Object Spritesheet.png`\n", "")) >= 2, True)
+check("and a listing of what a tool really copied is quiet",
+      ga.invented_files("The following files are in place: Tools.png, Egg_And_Nest.png.",
+                        "FILE_OP: COPY -> Tools.png\nFILE_OP: COPY -> Egg_And_Nest.png"), [])
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
