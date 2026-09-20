@@ -213,6 +213,71 @@ RANGE_RE = re.compile(r"^(\d+)\s*(?:-\s*(\d+)?)?$")
 NUMBERED_LINE_RE = re.compile(r"^\s*\d+\|")
 
 
+# Enough of the start to tell text from anything else.
+SNIFF_BYTES = 8192
+
+
+# What the first few bytes say a file is. Only formats likely to be handed to Bonsai.
+MAGIC = [
+    (b"\x89PNG\r\n\x1a\n", "PNG image"),
+    (b"\xff\xd8\xff", "JPEG image"),
+    (b"GIF8", "GIF image"),
+    (b"RIFF", "RIFF container (WebP or WAV)"),
+    (b"%PDF", "PDF document"),
+    (b"PK\x03\x04", "zip archive (or .docx/.xlsx/.odt)"),
+    (b"glTF", "glTF binary model (.glb)"),
+    (b"GGUF", "GGUF model weights"),
+    (b"OggS", "Ogg audio"),
+    (b"\x1f\x8b", "gzip archive"),
+    (b"\x7fELF", "compiled executable"),
+]
+
+
+def looks_binary(data):
+    """Whether these bytes are not text."""
+    sample = data[:SNIFF_BYTES]
+    if b"\x00" in sample:
+        return True
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        # A cut multi-byte character at the sniff boundary is not binary.
+        try:
+            data[:SNIFF_BYTES + 4].decode("utf-8")
+        except UnicodeDecodeError:
+            return True
+    return False
+
+
+def describe_binary(path, raw):
+    """What a binary file IS, since its bytes say nothing useful as text.
+
+    Handing over the real facts - kind, size, and an image's dimensions - lets a turn
+    reason about the file and reach for the right tool, instead of reading mojibake
+    and concluding the file is damaged."""
+    kind = next((name for magic, name in MAGIC if raw.startswith(magic)), None)
+    if kind is None and path.suffix.lower() == ".aseprite":
+        kind = "Aseprite sprite"        # its magic is at offset 4, not 0
+    kind = kind or f"binary file ({path.suffix or 'no extension'})"
+    size = f"{len(raw) / 1024:.1f} KB" if len(raw) >= 1024 else f"{len(raw)} bytes"
+
+    extra = ""
+    if "image" in kind:
+        try:
+            from PIL import Image
+            with Image.open(path) as image:
+                extra = f", {image.size[0]}x{image.size[1]}"
+        except Exception:
+            pass
+    how = ("LOOK at it to see it" if "image" in kind else
+           "open it with a program that understands it")
+    article = "an" if kind[0].lower() in "aeiou" else "a"
+    return (f"[{path.name} is {article} {kind}{extra}, {size}. Its bytes are not text, so they "
+            f"are not shown - this is NOT a damaged file. It is on disk at {path}. To "
+            f"work with it, {how}, or RUN a tool that reads this format (quote the path "
+            "if it contains spaces).]")
+
+
 def read_file(raw, numbered=True):
     """READ_FILE: <path> [| <first>-<last>] - read a text file.
 
@@ -234,9 +299,16 @@ def read_file(raw, numbered=True):
     if path.stat().st_size > MAX_READ_BYTES:
         return f"[File too large: {path.stat().st_size} bytes]"
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        raw = path.read_bytes()
     except Exception as exc:
         return f"[Read failed: {exc}]"
+    if looks_binary(raw):
+        # Decoding a sprite or a model with errors="replace" produced pages of
+        # replacement characters, and a turn asked to animate an attached .aseprite
+        # read that and reported, reasonably, that the file was corrupt. It was not:
+        # it was binary, and it had been handed over as if it were text.
+        return describe_binary(path, raw)
+    text = raw.decode("utf-8", errors="replace")
     # Credential stores are refused by path already; this is the password sitting in an
     # ordinary file inside a folder you trust. It is blanked before the model sees it,
     # because from the model it goes to the server, and the server is not always the

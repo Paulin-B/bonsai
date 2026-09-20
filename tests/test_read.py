@@ -62,5 +62,47 @@ check("changed nothing", f.read_text(), "def go():\n    return 1\n")
 r = ga.do_edit(str(f), "    return 1\n|||\n    return 2")
 check("clean copy still works", f.read_text(), "def go():\n    return 2\n")
 
+print("\n-- a binary file is described, not decoded into nonsense --")
+# Asked to animate an attached .aseprite, a run replied that the file was "corrupted
+# or incomplete". It was not: attaching read it as text with errors="replace", so what
+# reached the model was pages of replacement characters, and the only honest reading of
+# that IS a damaged file. Bonsai handed over the nonsense.
+png = d / "sheet.png"
+png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00\x01\x02" * 400)
+out = ga.read_file(str(png), numbered=False)
+check("a PNG is named as one", "PNG image" in out, True)
+check("with its size", "KB" in out or "bytes" in out, True)
+check("and it says this is not damage", "NOT a damaged file" in out, True)
+check("it says where the file is", str(png) in out, True)
+check("and how to look at an image", "LOOK at it" in out, True)
+check("none of the bytes are shown", "�" in out, False)
+
+ase = d / "bot.aseprite"
+ase.write_bytes(b"\x2e\x21\xe0\x42" + bytes(range(256)) * 8)
+out = ga.read_file(str(ase), numbered=False)
+check("an .aseprite is recognised by its extension", "Aseprite sprite" in out, True)
+check("with the right article", "is an Aseprite" in out, True)
+
+blob = d / "thing.bin"
+blob.write_bytes(bytes(range(256)) * 20)
+check("something unrecognised still says it is binary",
+      "binary file" in ga.read_file(str(blob), numbered=False), True)
+
+print("\n-- and text is still read as text --")
+script = d / "ok.gd"
+script.write_text("extends Node\n\nfunc go():\n\treturn 1\n")
+out = ga.read_file(str(script), numbered=False)
+check("a .gd file comes back as its contents", out.startswith("extends Node"), True)
+check("not as a description", out.startswith("["), False)
+utf8 = d / "accents.md"
+utf8.write_text("# Café\n\nRésumé of the naïve approach - 日本語 too.\n")
+out = ga.read_file(str(utf8), numbered=False)
+check("non-ASCII text is not mistaken for binary", "Café" in out, True)
+check("including CJK", "日本語" in out, True)
+
+print("\n-- and the numbered form describes it too --")
+check("READ_FILE on a binary says what it is",
+      "PNG image" in ga.read_file(str(png)), True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
