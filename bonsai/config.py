@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-20-binaryattach"
+APP_VERSION = "2026-09-20-assettools"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -260,6 +260,18 @@ ALLOWED_COMMANDS = {
     "echo", "pwd", "which", "env", "date", "unzip", "tar",
     "pacman", "checkupdates", "paru", "yay", "uname", "hostnamectl", "lscpu", "lsblk",
     "free", "uptime", "nvidia-smi", "pactl", "journalctl",
+}
+
+
+# Programs whose whole job is turning one file into another. They run without asking
+# when the invocation is headless, the working folder is trusted, and the sandbox is on
+# - the same folder in which python3 above already runs unasked, which is a far wider
+# capability than exporting a sprite. Making an animation means running one of these
+# many times over, and a prompt per run teaches the habit of clicking yes without
+# reading, which costs more safety than it buys.
+CONTENT_TOOLS = {
+    "aseprite", "blender", "godot", "godot4", "ffmpeg", "magick", "convert",
+    "inkscape", "sox", "gltf-transform",
 }
 
 

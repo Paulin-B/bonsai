@@ -232,5 +232,31 @@ for label, cmd in [
 check("the helper finds nothing in a clean argv",
       ga.unquoted_path_with_spaces(["ls", "-la", "/tmp"]), None)
 
+print("\n-- an asset tool does not ask permission for every frame --")
+# Making an animation means running the same tool over and over, and a prompt per run
+# teaches clicking yes without reading. These are allowed on the same terms python3
+# already was - trusted folder, sandboxed - and python3 is the wider capability.
+ga.save_settings({**ga.DEFAULTS, "sandbox_commands": True})
+for program, flag in [("aseprite", "--batch"), ("blender", "--background"),
+                      ("godot", "--headless")]:
+    _, _, verdict = ga.classify_command(f"{program} {flag} {work}/x | {work}")
+    check(f"{program} {flag} runs without asking", verdict, "allowed")
+
+print("\n-- but only on those terms --")
+_, _, verdict = ga.classify_command(f"aseprite --batch {box}/elsewhere | {box}")
+check("outside a trusted folder it still asks", verdict, "ask")
+ga.save_settings({**ga.DEFAULTS, "sandbox_commands": False})
+_, _, verdict = ga.classify_command(f"aseprite --batch {work}/x | {work}")
+check("with the sandbox off it still asks", verdict, "ask")
+ga.save_settings({**ga.DEFAULTS, "sandbox_commands": True})
+_, _, verdict = ga.classify_command(f"rm -rf {work} | {work}")
+check("a forbidden command is still never allowed",
+      "never allowed" in str(verdict), True)
+check("and a windowed invocation is still sent to LAUNCH",
+      "desktop application" in str(ga.classify_command(f"aseprite {work}/a.aseprite | {work}")[2])
+      if "aseprite" in ga.desktop_programs() else True, True)
+check("a tool that is not an asset tool still asks",
+      ga.classify_command(f"ffprobe --version | {work}")[2], "ask")
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
     QPageSize, QPdfWriter, QTextDocument,
 )
 from .config import (
-    ALLOWED_COMMANDS, COMMAND_TIMEOUT, FORBIDDEN_COMMANDS, MACOS, MAX_DOWNLOAD_BYTES, PROTECTED_PATHS, WINDOWS, is_read_only, sandbox_argv,
+    ALLOWED_COMMANDS, COMMAND_TIMEOUT, CONTENT_TOOLS, FORBIDDEN_COMMANDS, MACOS, MAX_DOWNLOAD_BYTES, PROTECTED_PATHS, WINDOWS, is_read_only, sandbox_argv,
 )
 from .store import (
     load_trusted, settings,
@@ -178,8 +178,12 @@ def classify_command(raw, background=False):
         return None, None, f"[Working directory not found: {workdir}]"
 
     in_trusted = path_is_trusted(str(workdir), load_trusted())
-    verdict = "allowed" if (in_trusted and program in ALLOWED_COMMANDS
-                            and is_read_only(program, argv)) else "ask"
+    routine = program in ALLOWED_COMMANDS and is_read_only(program, argv)
+    # A headless asset tool, sandboxed, inside a trusted folder. Without this every
+    # frame of an animation needed its own permission prompt.
+    sandboxed = settings().get("sandbox_commands", True) and sandbox_available()
+    content = (program in CONTENT_TOOLS and headless_invocation(argv) and sandboxed)
+    verdict = "allowed" if in_trusted and (routine or content) else "ask"
     return argv, workdir, verdict
 
 
