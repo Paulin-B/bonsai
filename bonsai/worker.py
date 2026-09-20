@@ -14,7 +14,7 @@ from .config import (
     DEBUG_LOG_FILE, DEFAULTS, MEMORY_FILE,
 )
 from .store import (
-    all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, unreachable_server,
+    all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, skills_matching, unreachable_server,
 )
 from .text import (
     DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
@@ -599,14 +599,22 @@ class Worker(QThread):
                         # It said it could not, without trying. The tools were listed in
                         # the same request it answered.
                         prodded = True
+                        # Naming the skill it already had beats repeating that tools
+                        # exist: a run refused three times to animate a sprite while
+                        # carrying aseprite-sprites and sprite-animation, unopened.
+                        skills = skills_matching(self.prompt, limit=2)
+                        pointer = ("" if not skills else
+                                   " You have a skill for this: "
+                                   + " and ".join(skills)
+                                   + ". USE_SKILL it and follow what it says.")
                         prompt = (
                             f"{prompt}\n\n[You said you cannot do that, but you did not "
                             "try. You can run commands on this machine, read and search "
                             "files, and search the web - the tools were available on the "
-                            "request you just answered. Use them and answer from what "
-                            "they return. Note the shell is not involved, so issue one "
-                            "plain command with its own arguments rather than chaining "
-                            "with && or piping.]")
+                            f"request you just answered.{pointer} Use them and answer "
+                            "from what they return. Note the shell is not involved, so "
+                            "issue one plain command with its own arguments rather than "
+                            "chaining with && or piping.]")
                         self.status.emit("It said it couldn't - prompting it to try...")
                         continue
                     if not recalled and unsearched_memory(reply, "\n".join(trace)):

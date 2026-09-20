@@ -401,9 +401,19 @@ HISTORY_CALL_RE = re.compile(r"^HISTORY:", re.IGNORECASE | re.M)
 DENIES_TOOL_RE = re.compile(
     r"\b(?:can(?:no|')t|cannot|unable to|not able to|do(?:n't| not) have (?:the )?"
     r"(?:ability|access|permission)s?)\b[^.!?\n]{0,70}"
-    r"\b(?:run|execute|check|access|read|open|list|search|look|see|inspect|query)\b"
+    # Looking at something and making something are both things it can do, and a
+    # refusal to make was sailing past: "I cannot create or animate a bot in Aseprite"
+    # and "I can't animate frames from this image" matched nothing, while it had a
+    # skill for exactly that job and ran no tool at all.
+    r"\b(?:run|execute|check|access|read|open|list|search|look|see|inspect|query"
+    r"|create|make(?!\s+sense)|generate|animate|draw|edit|write|build|modify|produce"
+    r"|export|convert|render|import|install|download)\b"
     r"|\bI(?:'m| am) (?:just )?(?:an? )?(?:AI|language model|text-based)\b"
-    r"|\bdo(?:n't| not) have (?:direct )?access to your\b",
+    r"|\bdo(?:n't| not) have (?:direct )?access to your\b"
+    # "requires the Aseprite application", "you would need to open it yourself" - the
+    # same refusal worded as a fact about the world rather than about itself.
+    r"|\brequires? the [A-Z]\w+ (?:application|program|editor|app)\b"
+    r"|\byou would need to (?:open|run|use|install)\b",
     re.IGNORECASE)
 
 

@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-19-whatopened"
+APP_VERSION = "2026-09-20-cannotmake"
 
 
 # Where the repo lives, for the optional files that ship beside it.

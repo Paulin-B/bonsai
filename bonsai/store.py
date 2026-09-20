@@ -510,6 +510,39 @@ def all_skills():
     return merged
 
 
+# Words too common to tell one skill from another.
+SKILL_STOPWORDS = {
+    "use", "the", "and", "for", "with", "this", "that", "when", "whenever", "asked",
+    "into", "from", "them", "then", "your", "you", "any", "all", "one", "out", "its",
+    "it", "a", "an", "of", "to", "in", "on", "or", "by", "is", "are", "be", "make",
+    "making", "made", "instead", "rather", "than", "about", "what", "which", "how",
+    "file", "files", "code", "run", "running", "something", "anything", "work",
+}
+
+
+def skills_matching(request, limit=3):
+    """Skills whose name or description shares a distinctive word with the request.
+
+    Used when a turn has said it cannot do something without trying: naming the skill
+    it already had is more use than repeating that tools exist. A run refused three
+    times to animate a sprite while carrying skills called aseprite-sprites and
+    sprite-animation, and never opened either."""
+    words = {w for w in re.findall(r"[a-z]{3,}", (request or "").lower())
+             if w not in SKILL_STOPWORDS}
+    if not words:
+        return []
+    scored = []
+    for name, skill in all_skills().items():
+        text = f"{name} {skill.get('description', '')}".lower()
+        hits = sum(1 for w in words if w in text)
+        # The name matching counts double: a skill called "sprite-animation" is a
+        # better answer to "animate a sprite" than one that merely mentions sprites.
+        hits += sum(1 for w in words if w in name.lower())
+        if hits:
+            scored.append((hits, name))
+    return [name for _, name in sorted(scored, reverse=True)[:limit]]
+
+
 # A slash only opens the drawer at the start of the text or after a space, so a path
 # like /home/you never looks like the beginning of a skill name.
 SKILL_TOKEN_RE = re.compile(r"(?:^|(?<=\s))/([A-Za-z0-9._-]*)$")

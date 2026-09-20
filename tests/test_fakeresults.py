@@ -170,5 +170,45 @@ check("and a listing of what a tool really copied is quiet",
       ga.invented_files("The following files are in place: Tools.png, Egg_And_Nest.png.",
                         "FILE_OP: COPY -> Tools.png\nFILE_OP: COPY -> Egg_And_Nest.png"), [])
 
+print("\n-- refusing to MAKE something, having tried nothing --")
+# Asked three times to animate a sprite, a run answered "I can't animate frames from
+# this image", "I cannot animate frames from this file", and "I cannot run or interact
+# with Aseprite directly" - running no tool at all, while carrying skills called
+# aseprite-sprites and sprite-animation it never opened. Two of the three matched
+# nothing: the check knew about refusing to READ, not about refusing to MAKE.
+for said in [
+    "I can't animate frames from this image because it's a single static PNG file.",
+    "I cannot animate frames from this file because it's a binary Aseprite file.",
+    "I cannot create or animate a bot in Aseprite because the file is binary.",
+    "I cannot run or interact with Aseprite directly.",
+    "Aseprite files are not text-based and require the Aseprite application to open.",
+    "I'm unable to generate a sprite sheet from that.",
+    "You would need to open it in Blender yourself.",
+]:
+    check(f"caught: {said[:50]}", bool(ga.DENIES_TOOL_RE.search(ga.plain_text(said))), True)
+
+print("\n-- but not ordinary sentences that happen to say 'can't' --")
+for said in [
+    "I can't make sense of that error - can you paste the whole traceback?",
+    "The belt is 32 pixels wide, so four treads fit.",
+    "Done - the sprite is in the project and imported.",
+    "That would need a scene, which the project does not have yet.",
+]:
+    check(f"allowed: {said[:50]}", bool(ga.DENIES_TOOL_RE.search(ga.plain_text(said))), False)
+
+print("\n-- and the correction names the skill it already had --")
+check("an animation request finds the animation skill",
+      "sprite-animation" in ga.skills_matching("Could you animate more frames of this bot"),
+      True)
+check("an Aseprite request finds the Aseprite skill",
+      "aseprite-sprites" in ga.skills_matching(
+          "make a bot in Aseprite and animate it moving"), True)
+check("a Godot import request finds the import skill",
+      "godot-import-art" in ga.skills_matching("import the pngs into godot"), True)
+check("and a request about nothing in particular suggests nothing",
+      ga.skills_matching("what is my cpu"), [])
+check("it returns at most what was asked for",
+      len(ga.skills_matching("animate a sprite in aseprite for godot", limit=2)) <= 2, True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
