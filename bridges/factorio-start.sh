@@ -63,6 +63,32 @@ MOD="$HOME_DIR/mods/bonsai-bridge_0.1.0"
 mkdir -p "$MOD"
 cp "$(dirname "$0")/mod/info.json" "$(dirname "$0")/mod/control.lua" "$MOD/"
 
+# The same mod goes into your own Factorio, or you cannot join: a client whose mods
+# differ from the server's is refused, and "sync mods with server" cannot help because
+# it fetches from the mod portal and this one exists only on this disk. Set
+# SKIP_CLIENT_MOD=1 to leave your install alone.
+CLIENT_MODS=${CLIENT_MODS:-$HOME/.factorio/mods}
+if [ -z "${SKIP_CLIENT_MOD:-}" ] && [ -d "$CLIENT_MODS" ]; then
+    mkdir -p "$CLIENT_MODS/bonsai-bridge_0.1.0"
+    cp "$(dirname "$0")/mod/info.json" "$(dirname "$0")/mod/control.lua" \
+       "$CLIENT_MODS/bonsai-bridge_0.1.0/"
+    python3 - "$CLIENT_MODS/mod-list.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = json.loads(path.read_text()) if path.exists() else {"mods": [{"name": "base", "enabled": True}]}
+for mod in data["mods"]:
+    if mod["name"] == "bonsai-bridge":
+        mod["enabled"] = True
+        break
+else:
+    data["mods"].append({"name": "bonsai-bridge", "enabled": True})
+path.write_text(json.dumps(data, indent=2))
+PY
+    echo "Installed the mod into $CLIENT_MODS too, so your client can join."
+    echo "Restart Factorio if it is open - mods are only read at startup."
+fi
+
 [ -f "$WORLD" ] || { echo "Creating a new map at $WORLD"
                      "$FACTORIO" -c "$CONFIG" --create "$WORLD"; }
 
