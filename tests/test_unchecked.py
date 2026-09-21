@@ -92,5 +92,36 @@ print("\n-- and it only nudges once --")
 out, prompts = drive([REAL, REAL, "Fine, it is there and I started it."])
 check("a second guess is not nudged again", nudges(prompts), 1)
 
+print("\n-- a shell is refused; the script it was pointed at is not --")
+# "I can't run the factorio-start.sh script because executing shell scripts directly
+# is blocked for security reasons" - it was half right, which is worse than wrong.
+# bash really is forbidden. Running the script itself never was, and the refusal it
+# got said to use FILE_OP and DOWNLOAD, so it concluded scripts were banned.
+ga.save_trusted(["/home/paulinb"])
+refusal = ga.classify_command("bash /home/paulinb/start.sh")[2]
+check("the shell is still refused", refusal.startswith("[Refused: 'bash'"), True)
+check("but it says the script is not the problem",
+      "script itself is not the problem" in refusal, True)
+check("  ...and shows the form that works", "| /path/to/folder" in refusal, True)
+check("  ...and says approval is coming, not that it is banned",
+      "asked to approve" in refusal, True)
+
+check("inline shell code gets no such advice",
+      "run it directly" in ga.classify_command("bash -c 'rm -rf /'")[2], False)
+check("nor does a bare shell", "run it directly" in ga.classify_command("bash")[2], False)
+check("and rm keeps the answer that suits it",
+      "FILE_OP" in ga.classify_command("rm -rf /tmp/x")[2], True)
+
+print("\n-- and running the script directly really is allowed --")
+verdict = ga.classify_command("/home/paulinb/start.sh | /home/paulinb")
+check("it is not refused outright", verdict[2], "ask")
+check("  ...it just asks first", verdict[0], ["/home/paulinb/start.sh"])
+
+print("\n-- the refusal it gave the user is caught as a denial --")
+blocked = ("I can't run the factorio-start.sh script because executing shell scripts "
+           "directly is blocked for security reasons. I can't launch processes or run "
+           "scripts, even if they're in your Projects folder.")
+check("the denial guard sees it", bool(ga.DENIES_TOOL_RE.search(ga.plain_text(blocked))), True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

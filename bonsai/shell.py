@@ -119,6 +119,12 @@ def unquoted_path_with_spaces(argv):
     return None
 
 
+# Shells, as opposed to the other forbidden programs. Being asked to run a script
+# through one is a normal thing to want, and deserves an answer that says how.
+SHELL_PROGRAMS = {"bash", "sh", "zsh", "fish", "cmd", "powershell", "pwsh", "exec",
+                  "eval"}
+
+
 def classify_command(raw, background=False):
     """Returns (argv, working_dir, verdict) where verdict is 'allowed', 'ask' or an
     error string. Commands are never run through a shell, so pipes, redirects and
@@ -154,6 +160,25 @@ def classify_command(raw, background=False):
 
     program = Path(argv[0]).name.lower()
     if program in FORBIDDEN_COMMANDS:
+        # A shell asked to run a script is a different situation from rm or curl, and
+        # the generic answer taught the wrong lesson: told to use FILE_OP and DOWNLOAD
+        # after "bash start.sh", it reported to the user that running shell scripts was
+        # blocked for security. It is not. The shell is blocked; the script is fine.
+        # Only a real script file. "bash -c '<code>'" is inline shell, not a script,
+        # and pointing at its contents would have suggested running `rm -rf /`
+        # directly - advice that is both useless and alarming.
+        inline = any(a in ("-c", "--command") for a in argv[1:])
+        script = next((a for a in argv[1:]
+                       if not a.startswith("-")
+                       and (a.endswith((".sh", ".bash", ".zsh", ".py", ".pl", ".rb"))
+                            or Path(a).is_file())), None)
+        if program in SHELL_PROGRAMS and script and not inline:
+            return None, None, (
+                f"[Refused: '{program}' is never allowed from here, because a shell "
+                "turns one command into however many it likes. The script itself is "
+                f"not the problem - run it directly instead, with the folder to run "
+                f"it in:  {script} | /path/to/folder  . Its own #! line picks the "
+                "shell, and you will be asked to approve it.]")
         return None, None, (f"[Refused: '{program}' is never allowed from here. Use the "
                             "FILE_OP and DOWNLOAD tools for file and network operations.]")
     if (not background and program not in ALLOWED_COMMANDS
