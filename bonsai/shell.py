@@ -125,6 +125,32 @@ SHELL_PROGRAMS = {"bash", "sh", "zsh", "fish", "cmd", "powershell", "pwsh", "exe
                   "eval"}
 
 
+SCRIPT_SUFFIXES = (".sh", ".bash", ".zsh", ".py", ".pl", ".rb")
+
+
+def without_shell_wrapper(argv):
+    """`sh start.sh` becomes `start.sh`. Anything else is returned untouched.
+
+    Putting `sh` in front of a script is how everyone runs one, and the model went on
+    doing it after two different refusals had spelled out the direct form - the second
+    of them quoting the exact command to use. A third wording was not going to work
+    either, so the wrapper is simply dropped.
+
+    Nothing is loosened by this. What remains is the script, run by its own shebang,
+    through the same trusted-folder and approval checks as any other command, and
+    without the shell that would have let one command become several. Inline code
+    (`sh -c ...`) is not rewritten: that really is a shell, and it stays refused."""
+    if len(argv) < 2 or Path(argv[0]).name.lower() not in SHELL_PROGRAMS:
+        return argv
+    rest = argv[1:]
+    if any(token.startswith("-") for token in rest):
+        return argv          # -c is inline code; other flags are for the shell itself
+    script = rest[0]
+    if not (script.endswith(SCRIPT_SUFFIXES) or Path(script).expanduser().is_file()):
+        return argv
+    return rest
+
+
 def classify_command(raw, background=False):
     """Returns (argv, working_dir, verdict) where verdict is 'allowed', 'ask' or an
     error string. Commands are never run through a shell, so pipes, redirects and
@@ -158,6 +184,11 @@ def classify_command(raw, background=False):
                             "apart into separate arguments. Put quotes round it: "
                             f'"{split_path}".]')
 
+    argv = without_shell_wrapper(argv)
+    if argv[0].startswith("~"):
+        # Commands run without a shell, so a leading ~ is a directory literally named
+        # "~" and the command is simply not found. Nobody has ever meant that.
+        argv = [str(Path(argv[0]).expanduser())] + argv[1:]
     program = Path(argv[0]).name.lower()
     if program in FORBIDDEN_COMMANDS:
         # A shell asked to run a script is a different situation from rm or curl, and
@@ -170,8 +201,7 @@ def classify_command(raw, background=False):
         inline = any(a in ("-c", "--command") for a in argv[1:])
         script = next((a for a in argv[1:]
                        if not a.startswith("-")
-                       and (a.endswith((".sh", ".bash", ".zsh", ".py", ".pl", ".rb"))
-                            or Path(a).is_file())), None)
+                       and (a.endswith(SCRIPT_SUFFIXES) or Path(a).is_file())), None)
         if program in SHELL_PROGRAMS and script and not inline:
             return None, None, (
                 f"[Refused: '{program}' is never allowed from here, because a shell "

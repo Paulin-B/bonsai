@@ -7,6 +7,7 @@ denying its own abilities; this is the same refusal worded as a fact about the w
 which sounds far more authoritative and is worth exactly as much.
 """
 import sys
+from pathlib import Path
 from bonsai_under_test import load
 ga = load()
 ok = fail = 0
@@ -98,7 +99,10 @@ print("\n-- a shell is refused; the script it was pointed at is not --")
 # bash really is forbidden. Running the script itself never was, and the refusal it
 # got said to use FILE_OP and DOWNLOAD, so it concluded scripts were banned.
 ga.save_trusted(["/home/paulinb"])
-refusal = ga.classify_command("bash /home/paulinb/start.sh")[2]
+# A plain "bash start.sh" is no longer refused at all - the wrapper is dropped and the
+# script runs. The message still matters for the forms that are not rewritten, like a
+# shell given flags of its own.
+refusal = ga.classify_command("bash --login /home/paulinb/start.sh")[2]
 check("the shell is still refused", refusal.startswith("[Refused: 'bash'"), True)
 check("but it says the script is not the problem",
       "script itself is not the problem" in refusal, True)
@@ -122,6 +126,37 @@ blocked = ("I can't run the factorio-start.sh script because executing shell scr
            "directly is blocked for security reasons. I can't launch processes or run "
            "scripts, even if they're in your Projects folder.")
 check("the denial guard sees it", bool(ga.DENIES_TOOL_RE.search(ga.plain_text(blocked))), True)
+
+print("\n-- and in the end, it just runs the script --")
+# Two refusals explained the direct form, the second quoting the exact command, and
+# the model issued "sh factorio-start.sh" both times anyway. A third wording was not
+# going to work, so the wrapper is dropped instead.
+for command in ["sh factorio-start.sh | /home/paulinb",
+                "bash /home/paulinb/start.sh | /home/paulinb",
+                "sh ~/start.sh | /home/paulinb",
+                "/home/paulinb/start.sh | /home/paulinb"]:
+    argv, _, verdict = ga.classify_command(command)
+    check(f"runs: {command.split('|')[0].strip()}", verdict, "ask")
+    check("  ...without a shell in front of it",
+          Path(argv[0]).name.lower() in ga.SHELL_PROGRAMS, False)
+
+check("a leading ~ is expanded, since no shell is there to do it",
+      ga.classify_command("sh ~/start.sh | /home/paulinb")[0][0].startswith("/home/"),
+      True)
+
+print("\n-- but a shell is still a shell --")
+for refused in ["bash -c 'rm -rf /' | /home/paulinb",
+                "bash | /home/paulinb",
+                "zsh -c 'curl x' | /home/paulinb",
+                "bash --login | /home/paulinb"]:
+    argv, _, verdict = ga.classify_command(refused)
+    check(f"nothing runs for: {refused.split('|')[0].strip()[:30]}", argv, None)
+check("dropping the wrapper does not smuggle in extra arguments",
+      ga.without_shell_wrapper(["sh", "a.sh", "b.sh"]), ["a.sh", "b.sh"])
+check("a non-script argument is left alone",
+      ga.without_shell_wrapper(["sh", "somewhere"]), ["sh", "somewhere"])
+check("and a command that is not a shell is untouched",
+      ga.without_shell_wrapper(["python3", "x.py"]), ["python3", "x.py"])
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
