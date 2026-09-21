@@ -354,10 +354,25 @@ def main():
     parser.add_argument("--quiet", action="store_true",
                         help="add context silently, without inviting a reply")
     args = parser.parse_args()
-    rcon = Rcon(args.rcon_host, args.rcon_port, args.rcon_password)
+    try:
+        rcon = Rcon(args.rcon_host, args.rcon_port, args.rcon_password)
+    except OSError as exc:
+        sys.exit(f"Could not reach Factorio's RCON on {args.rcon_host}:"
+                 f"{args.rcon_port} ({exc}). Is the server running, and was it "
+                 "started with --rcon-port and --rcon-password?")
     print(f"RCON connected to {args.rcon_host}:{args.rcon_port}")
-    asyncio.run(play(rcon, f"ws://127.0.0.1:{args.neuro_port}", args.quiet,
-                     args.server_log))
+    url = f"ws://127.0.0.1:{args.neuro_port}"
+    try:
+        asyncio.run(play(rcon, url, args.quiet, args.server_log))
+    except KeyboardInterrupt:
+        print("\nstopped")
+    except OSError as exc:
+        # By far the likeliest way to arrive here, and a bare traceback about a
+        # refused connection does not say the one thing that would fix it.
+        sys.exit(f"Could not reach Bonsai at {url} ({exc}).\n"
+                 "Switch 'Game link' on in Bonsai, then start this again. If it is "
+                 "already on, check the Game link port in Settings matches "
+                 f"--neuro-port ({args.neuro_port}).")
 
 
 if __name__ == "__main__":
