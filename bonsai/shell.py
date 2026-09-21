@@ -283,9 +283,29 @@ def sandbox_available():
     return not (WINDOWS or MACOS) and bool(shutil.which("bwrap"))
 
 
-def execute_command(argv, workdir):
+# What a command looks like when the sandbox is the reason it failed, rather than the
+# command being wrong. Worth telling apart: one is fixed by asking the user, the other
+# by fixing the command, and guessing between them wastes a turn either way.
+SANDBOX_SYMPTOMS = (
+    "read-only file system",
+    "operation not permitted",
+    "network is unreachable",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "address family not supported",
+)
+
+
+def sandbox_blocked(output):
+    """Did this fail because of the sandbox? Only meaningful for a sandboxed run."""
+    low = (output or "").lower()
+    return any(symptom in low for symptom in SANDBOX_SYMPTOMS)
+
+
+def execute_command(argv, workdir, sandbox=None):
     config = settings()
-    sandboxed = config.get("sandbox_commands", True) and sandbox_available()
+    sandboxed = (config.get("sandbox_commands", True) and sandbox_available()
+                 if sandbox is None else bool(sandbox))
     launch = (sandbox_argv(argv, workdir, config.get("sandbox_network", False))
               if sandboxed else argv)
     try:
@@ -380,7 +400,7 @@ class BackgroundProcess:
             return f"{self.name} did not stop when asked and was killed."
 
 
-def start_background(argv, workdir):
+def start_background(argv, workdir, sandbox=None):
     """Run a command without waiting for it, and keep hold of it."""
     config = settings()
     with _background_lock:
@@ -390,7 +410,8 @@ def start_background(argv, workdir):
         if running >= MAX_BACKGROUND:
             return (f"[Refused: {running} background processes are already running, which "
                     f"is the limit. BG: STOP one first, or BG: LIST to see them.]")
-    sandboxed = config.get("sandbox_commands", True) and sandbox_available()
+    sandboxed = (config.get("sandbox_commands", True) and sandbox_available()
+                 if sandbox is None else bool(sandbox))
     launch = (sandbox_argv(argv, workdir, config.get("sandbox_network", False))
               if sandboxed else argv)
     try:
@@ -441,7 +462,19 @@ def background_read(raw):
     if process.dropped:
         missing = (f"\n[{process.dropped} earlier line(s) scrolled out of the buffer - "
                    "only the most recent are kept.]")
-    return f"{head}{missing}\n" + "\n".join(lines)
+    body = "\n".join(lines)
+    note = ""
+    if process.sandboxed and sandbox_blocked(body):
+        # A background job fails here rather than where it was started, so the reason
+        # has to be said here too. Without it the output reads as the program being
+        # broken: a game server cannot write outside the project folder or be reached
+        # on a port, and neither fact is in "Read-only file system".
+        note = ("\n[This was started sandboxed, and that output is what the sandbox "
+                "looks like from inside: it can only write to its own folder and has "
+                "no network. If the program needs either - a server that must be "
+                "reachable, or anything writing to your home directory - say so and "
+                "offer to start it again outside the sandbox.]")
+    return f"{head}{missing}\n{body}{note}"
 
 
 def background_stop(raw):

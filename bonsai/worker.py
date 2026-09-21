@@ -27,7 +27,7 @@ from .codeintel import (
     FILE_OPS, describe_references,
 )
 from .shell import (
-    _approved_windows, approve_window, background_list, background_read, background_stop, classify_command, classify_launch, download_file, execute_command, focused_window, handle_play, make_pdf, pid_is_ours, start_background, start_program,
+    _approved_windows, approve_window, background_list, background_read, background_stop, classify_command, sandbox_blocked, classify_launch, download_file, execute_command, focused_window, handle_play, make_pdf, pid_is_ours, start_background, start_program,
 )
 from .stage import (
     handle_stage, stage_look,
@@ -322,7 +322,30 @@ class Worker(QThread):
             if not self.ask_permission(description):
                 return "[The user did not grant permission to run this command.]"
         self.status.emit(f"Running: {' '.join(argv)[:50]}")
-        return execute_command(argv, workdir)
+        result = execute_command(argv, workdir)
+        return self.offer_without_sandbox(result, argv, workdir, execute_command)
+
+    def offer_without_sandbox(self, result, argv, workdir, run):
+        """Some jobs cannot work sandboxed, and asking is better than giving up.
+
+        A game server has to write outside the project folder and has to be reachable
+        on a port, and the sandbox denies both by design. The old answer was to tell
+        the user to turn the sandbox off in Settings, which is a global switch they
+        then have to remember to turn back on. This asks about one command instead,
+        and says plainly what is being given up."""
+        if "(sandboxed)" not in result or not sandbox_blocked(result):
+            return result
+        description = (f"Run this again OUTSIDE the sandbox?\n  {' '.join(argv)}\n\n"
+                       f"In folder:\n  {workdir}\n\n"
+                       "It failed sandboxed, and the error says the sandbox was why. "
+                       "Outside it the command can write anywhere you can and can use "
+                       "the network. Only allow this if you know what the command does.")
+        self.status.emit("Sandbox blocked it - asking...")
+        if not self.ask_permission(description):
+            return (result + "\n[The user did not allow this to run outside the "
+                    "sandbox, so it stays blocked. Do not try again this turn.]")
+        self.status.emit("Running outside the sandbox...")
+        return run(argv, workdir, sandbox=False)
 
     def run_play(self, raw):
         """Send input to a program, within whatever reach the user has allowed.
