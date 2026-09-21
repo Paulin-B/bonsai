@@ -45,10 +45,32 @@ for reply in [
     check(f"not flagged: {reply[:44]}", fired, False)
 
 print("\n-- the nudge is one-shot and only when nothing ran --")
-from bonsai_under_test import APP
-text = APP.read_text()
-check("gated on an empty trace", "not prodded and not trace and DENIES_TOOL_RE" in text, True)
-check("one-shot", text.count("prodded = True"), 1)
+# Checked by running a turn, not by counting phrases in the source. This used to
+# assert that "prodded = True" appeared once in the file, which said nothing about
+# behaviour and went red the moment a second guard reused the same one-shot flag.
+def drive(replies, tool_result="ok"):
+    worker = ga.Worker("check for updates", False, [],
+                       {"max_tool_steps": 6, "native_tools": False})
+    prompts, seq = [], list(replies)
+    def ask(system, prompt, image=None, temperature=None, with_tools=True, stream=False):
+        prompts.append(prompt)
+        return (seq.pop(0) if seq else replies[-1], None)
+    worker.ask_model = ask
+    worker.run_tool = lambda name, argument: tool_result
+    worker.model_name = lambda: "fake"
+    worker.run()
+    return prompts
+
+REFUSAL = "I can't check for updates because I don't have access to your package manager."
+added = lambda prompts, phrase: max((p.count(phrase) for p in prompts), default=0)
+
+prompts = drive([REFUSAL, "There are 311 updates."])
+check("a refusal with nothing tried is pushed back on",
+      added(prompts, "you did not try"), 1)
+check("refusing twice still only pushes back once",
+      added(drive([REFUSAL, REFUSAL, "Fine: 311 updates."]), "you did not try"), 1)
+check("and a refusal after a real tool call is left alone",
+      added(drive(["[TOOL: RUN: pacman -Qu]", REFUSAL]), "you did not try"), 0)
 
 print("\n-- the machine describes itself --")
 facts = ga.system_facts()

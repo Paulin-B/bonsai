@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-21-factorio"
+APP_VERSION = "2026-09-21-checkfirst"
 
 
 # Where the repo lives, for the optional files that ship beside it.

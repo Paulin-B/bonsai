@@ -395,6 +395,28 @@ DENIES_RECALL_RE = re.compile(
 HISTORY_CALL_RE = re.compile(r"^HISTORY:", re.IGNORECASE | re.M)
 
 
+# Stating something about THIS machine that it never looked at. Asked to start the
+# Factorio server, it answered "I can't start a Factorio server for you because it's
+# not installed on this machine" - with Factorio installed, a launcher script for it
+# in the project, and not one tool call made. A denial of its own ability is caught
+# above; this is the same refusal dressed as a fact about the world, which reads as
+# far more authoritative and is just as unfounded.
+UNCHECKED_CLAIM_RE = re.compile(
+    r"\b(?:"
+    # "is not installed", not "I have not installed anything": the claim is about a
+    # thing's state, and the bare word pair appears in ordinary past-tense sentences.
+    r"(?:is|are|it'?s|they'?re)\s+not\s+installed"
+    r"|(?:isn'?t|aren'?t)\s+installed"
+    r"|not installed (?:on|in) (?:this|your)"
+    r"|do(?:n't| not) (?:appear to )?have\s+[\w .+-]{1,40}\s+installed"
+    r"|there (?:is|are|'s) no (?:such )?(?:file|folder|directory|program|command"
+    r"|script|server|game|application)\b"
+    r"|(?:does|do) not exist (?:on|in) (?:this|your)\b"
+    r"|(?:is|are) not (?:available|present|set up|configured) (?:on|in) (?:this|your)\b"
+    r"|no (?:such )?(?:file|program|command) (?:called|named)\b"
+    r")", re.I)
+
+
 # Disclaiming a capability it has. Twice in three runs, asked to check for system
 # updates, it answered "I don't have access to your package manager" without calling
 # anything - the tools were there and simply went unused.

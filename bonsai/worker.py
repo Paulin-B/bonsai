@@ -18,7 +18,7 @@ from .store import (
     all_skills, character_voice, fetch_briefing, load_character, load_memory, load_screen_log, load_trusted, MOOD_STEPS, mood_line, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, shift_mood, skills_matching, unreachable_server,
 )
 from .text import (
-    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, already_believes, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, UNCHECKED_CLAIM_RE, already_believes, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -634,6 +634,22 @@ class Worker(QThread):
                             "issue one plain command with its own arguments rather than "
                             "chaining with && or piping.]")
                         self.status.emit("It said it couldn't - prompting it to try...")
+                        continue
+                    if (not prodded and not trace
+                            and UNCHECKED_CLAIM_RE.search(plain_text(reply))):
+                        # A refusal worded as a fact about the machine rather than
+                        # about itself: "it's not installed on this machine", said
+                        # about an installed program, with no tool call made. It reads
+                        # as authoritative and is worth exactly as much as a guess.
+                        prodded = True
+                        prompt = (
+                            f"{prompt}\n\n[You stated that as a fact about this "
+                            "machine, but you did not look, so you do not know it. "
+                            "Check before you say it: run a command to find the "
+                            "program (which, ls, command -v), list the folder, or "
+                            "search for the file. Then answer from what came back. If "
+                            "it really is missing, say so and say how you checked.]")
+                        self.status.emit("It guessed about this machine - making it look...")
                         continue
                     if not recalled and unsearched_memory(reply, "\n".join(trace)):
                         # It said it doesn't know, without opening the drawer it was
