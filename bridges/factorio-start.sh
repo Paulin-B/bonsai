@@ -16,6 +16,9 @@ HOME_DIR=${FACTORIO_HOME:-$HOME/.factorio-bonsai}
 WORLD=${1:-$HOME_DIR/world.zip}
 PASSWORD=${RCON_PASSWORD:-bonsai}
 RCON_PORT=${RCON_PORT:-27015}
+# Not Factorio's default 34197: you may well have a game of your own using it, and the
+# server then dies with "host address is already in use".
+GAME_PORT=${GAME_PORT:-34198}
 NEURO_PORT=${NEURO_PORT:-8000}
 LOG="$HOME_DIR/server.log"
 CONFIG="$HOME_DIR/config.ini"
@@ -36,10 +39,35 @@ write-data=$HOME_DIR
 INI
 fi
 
+# auto_pause is the one that matters. A headless server with nobody connected pauses
+# the game, and RCON still answers while it is paused - so mining and building appear
+# to work while walking does not move at all, which reads as being stuck in one spot.
+SETTINGS="$HOME_DIR/server-settings.json"
+if [ ! -f "$SETTINGS" ]; then
+    cat > "$SETTINGS" <<JSON
+{
+  "name": "Bonsai's world",
+  "description": "Bonsai plays here. Join at localhost.",
+  "visibility": { "public": false, "lan": true },
+  "require_user_verification": false,
+  "auto_pause": false,
+  "autosave_interval": 10,
+  "autosave_only_on_server": true
+}
+JSON
+fi
+
+# The body, its name and the per-tick walking all live in a mod, because walking_state
+# is an input the game clears every tick and RCON cannot set it sixty times a second.
+MOD="$HOME_DIR/mods/bonsai-bridge_0.1.0"
+mkdir -p "$MOD"
+cp "$(dirname "$0")/mod/info.json" "$(dirname "$0")/mod/control.lua" "$MOD/"
+
 [ -f "$WORLD" ] || { echo "Creating a new map at $WORLD"
                      "$FACTORIO" -c "$CONFIG" --create "$WORLD"; }
 
-"$FACTORIO" -c "$CONFIG" --start-server "$WORLD" \
+"$FACTORIO" -c "$CONFIG" --start-server "$WORLD" --server-settings "$SETTINGS" \
+    --port "$GAME_PORT" \
     --rcon-port "$RCON_PORT" --rcon-password "$PASSWORD" > "$LOG" 2>&1 &
 SERVER=$!
 # Killed on the way out however this script ends, so a stray headless server is not
@@ -52,7 +80,8 @@ for _ in $(seq 60); do
     sleep 1
 done
 grep -q "Starting RCON interface" "$LOG" || { echo "RCON never opened:"; tail -5 "$LOG"; exit 1; }
-echo "RCON is up on $RCON_PORT. Join this world at localhost from your own client."
+echo "RCON is up on $RCON_PORT."
+echo "Join this world from your own Factorio: Multiplayer, Connect to address, localhost:$GAME_PORT"
 
 # Not exec: that would replace this shell and take the EXIT trap with it, leaving the
 # headless server running after the bridge stops. It then holds the lock on its own

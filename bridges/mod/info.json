@@ -1,0 +1,9 @@
+{
+  "name": "bonsai-bridge",
+  "version": "0.1.0",
+  "title": "Bonsai bridge",
+  "author": "Bonsai",
+  "description": "Gives Bonsai a body that walks, with a name above it, and a remote interface the bridge drives over RCON.",
+  "factorio_version": "2.0",
+  "dependencies": ["base"]
+}

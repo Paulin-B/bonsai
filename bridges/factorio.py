@@ -73,11 +73,19 @@ class Rcon:
 # sentence goes straight back to Bonsai as the action result, so it has to be true:
 # "there is no iron ore within 200 tiles" is a useful thing to be told, and a cheerful
 # "mined!" that mined nothing is the failure this whole app is built to avoid.
+# Find the body, never create one. A console command and a mod do not share `storage`
+# - the console's table belongs to the scenario - so a bot() that created its own
+# character made a SECOND one: the mod walked its body across the map while every
+# other action was performed by a different character standing back at the origin,
+# each reporting its own position perfectly truthfully.
 BOT = """
 local function bot()
-  if storage.bot and storage.bot.valid then return storage.bot end
-  storage.bot = game.surfaces.nauvis.create_entity{name='character', position={0,0}, force='player'}
-  return storage.bot
+  local found = game.surfaces.nauvis.find_entities_filtered{name='character', limit=1}[1]
+  if not found then
+    remote.call('bonsai', 'spawn', 'Bonsai')
+    found = game.surfaces.nauvis.find_entities_filtered{name='character', limit=1}[1]
+  end
+  return found
 end
 """
 
@@ -105,16 +113,66 @@ rcon.print('You are at '..math.floor(p.x)..','..math.floor(p.y)..
         "description": "Walk to a point on the map. Use coordinates you were told about.",
         "schema": {"type": "object", "required": ["x", "y"],
                    "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}},
+        # Handled in Python rather than one shot of Lua, because walking takes time
+        # and the interesting part is whether it got there.
+        "walk": True,
+    },
+    "insert": {
+        "description": "Put something you are carrying into a nearby machine - coal "
+                       "into a furnace to fuel it, ore into a furnace to smelt.",
+        "schema": {"type": "object", "required": ["item", "into"],
+                   "properties": {"item": {"type": "string"},
+                                  "into": {"type": "string"},
+                                  "count": {"type": "integer"}}},
         "lua": BOT + """
-local c = bot()
-local was = c.position
-if math.abs(was.x - ARG_x) < 2 and math.abs(was.y - ARG_y) < 2 then
-  rcon.print('You are already standing at '..math.floor(was.x)..','..math.floor(was.y)..
-    ', so that changed nothing. Do something here instead of walking again.')
+local c = bot() local s = c.surface
+local machine = s.find_entities_filtered{position=c.position, radius=12,
+                                         name='ARG_into', limit=1}[1]
+if not machine then
+  rcon.print('There is no ARG_into within reach. Place one first, or walk to it.')
   return
 end
-c.teleport({ARG_x, ARG_y})
-rcon.print('Walked to '..math.floor(c.position.x)..','..math.floor(c.position.y)..'.')
+local have = c.get_item_count('ARG_item')
+if have < 1 then rcon.print('You are not carrying any ARG_item.') return end
+local moved = machine.insert{name='ARG_item', count=math.min(have, ARG_count)}
+if moved == 0 then
+  rcon.print('The ARG_into would not take ARG_item - wrong slot for it, or it is full.')
+else
+  c.remove_item{name='ARG_item', count=moved}
+  rcon.print('Put '..moved..' ARG_item into the ARG_into.')
+end
+""",
+    },
+    "take": {
+        "description": "Take everything out of a nearby machine - finished plates out "
+                       "of a furnace, for instance.",
+        "schema": {"type": "object", "required": ["from"],
+                   "properties": {"from": {"type": "string"}}},
+        "lua": BOT + """
+local c = bot() local s = c.surface
+local machine = s.find_entities_filtered{position=c.position, radius=12,
+                                         name='ARG_from', limit=1}[1]
+if not machine then rcon.print('There is no ARG_from within reach.') return end
+local took = {}
+for _, which in pairs({defines.inventory.furnace_result, defines.inventory.chest,
+                       defines.inventory.furnace_source}) do
+  local inv = machine.get_inventory(which)
+  if inv then
+    for _, stack in pairs(inv.get_contents()) do
+      local moved = c.insert{name=stack.name, count=stack.count}
+      if moved > 0 then
+        inv.remove{name=stack.name, count=moved}
+        took[#took+1] = moved..' '..stack.name
+      end
+    end
+  end
+end
+if #took == 0 then
+  rcon.print('The ARG_from had nothing ready. A furnace needs fuel and ore in it, and '..
+    'a few seconds to work.')
+else
+  rcon.print('Took '..table.concat(took, ', ')..' out of the ARG_from.')
+end
 """,
     },
     "mine": {
@@ -259,12 +317,71 @@ async def watch_chat(path, on_line):
             await on_line(found.group(1), found.group(2).strip())
 
 
+WALK_TIMEOUT = 45
+
+
+async def walk(rcon, x, y):
+    """Ask the mod to walk there, then watch until it arrives or gives up.
+
+    Reported by where it ended up, not by the request having been accepted. A walk
+    that was blocked by a cliff and a walk that worked look identical to whoever
+    issued it, and only one of them is worth saying out loud."""
+    # Already there is the commonest request and the least useful one: the arrival
+    # radius is a couple of tiles, so walking one tile "succeeds" without moving, and
+    # a turn spent doing that is a turn spent standing still. Say so instead.
+    here = rcon.lua("local c = game.surfaces.nauvis.find_entities_filtered"
+                    "{name='character', limit=1}[1] "
+                    "rcon.print(string.format('%.1f %.1f', c.position.x, c.position.y))")
+    try:
+        at_x, at_y = (float(part) for part in here.split())
+    except ValueError:
+        at_x = at_y = None
+    if at_x is not None and abs(at_x - x) < 4 and abs(at_y - y) < 4:
+        return (f"You are already at {at_x:.0f},{at_y:.0f}, which is close enough to "
+                f"{int(x)},{int(y)} to work there. Walking again changes nothing - do "
+                "the thing you came here for.")
+
+    rcon.lua(f"remote.call('bonsai','walk_to', {int(x)}, {int(y)})")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + WALK_TIMEOUT
+    while loop.time() < deadline:
+        await asyncio.sleep(0.6)
+        report = rcon.lua(
+            "local s = remote.call('bonsai','state') "
+            "rcon.print(string.format('%d %.1f %.1f %.1f %s %s', s.arrived and 1 or 0, "
+            "s.x, s.y, s.remaining, tostring(s.stuck), tostring(s.unreachable)))")
+        parts = report.split()
+        if len(parts) != 6:
+            return f"Something went wrong walking there: {report[:120]}"
+        arrived, px, py, left, stuck, unreachable = parts
+        where = f"{float(px):.0f},{float(py):.0f}"
+        if unreachable == "true":
+            return (f"There is no way to walk to {int(x)},{int(y)} - water or cliffs "
+                    f"in between. You are still at {where}.")
+        if stuck == "true":
+            return (f"Something blocked the way and you stopped at {where}, "
+                    f"{float(left):.0f} tiles short. Try going somewhere else first.")
+        if arrived == "1":
+            return f"Walked to {where}."
+    return f"Still walking after {WALK_TIMEOUT} seconds - it is a long way."
+
+
 async def play(rcon, url, quiet, server_log=None):
     async with websockets.connect(url) as ws:
         async def send(command, data=None):
             await ws.send(json.dumps({"command": command, "game": "Factorio",
                                       **({"data": data} if data else {})}))
 
+        # A body with a name over it, so someone watching can see where it is and
+        # what it is doing, instead of entities appearing out of nowhere.
+        spawned = rcon.lua("local p = remote.call('bonsai','spawn','Bonsai') "
+                           "rcon.print(string.format('%.0f,%.0f', p.x, p.y))")
+        if spawned.startswith("Cannot execute"):
+            print("The bonsai-bridge mod is not loaded, so there is no body to walk "
+                  "around with. Start the server with bridges/factorio-start.sh, which "
+                  "installs it.")
+        else:
+            print(f"body spawned at {spawned}, named on the map")
         await send("startup")
         await send("actions/register", {"actions": [
             {"name": name, "description": spec["description"],
@@ -308,12 +425,17 @@ async def play(rcon, url, quiet, server_log=None):
                     await send("action/result", {"id": body["id"], "success": False,
                         "message": f"There is no action called {name}."})
                 else:
-                    code, complaint = build_lua(name, data)
+                    if ACTIONS[name].get("walk"):
+                        outcome = await walk(rcon, data.get("x", 0), data.get("y", 0))
+                        complaint = None
+                    else:
+                        code, complaint = build_lua(name, data)
+                        outcome = None if complaint else (rcon.lua(code)
+                                                          or "Nothing happened.")
                     if complaint:
                         await send("action/result", {"id": body["id"], "success": False,
                                                      "message": complaint})
                     else:
-                        outcome = rcon.lua(code) or "Nothing happened."
                         print(f"  {name}({json.dumps(data)}) -> {outcome}")
                         # success stays true even when the attempt achieved nothing:
                         # the spec retries the whole force on a false, and "there is no
