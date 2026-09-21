@@ -81,6 +81,21 @@ check("tag stripped", "EVOLVE" in left, False)
 check("trait recorded", "Blunt when it matters." in ga.load_character()["learned_traits"], True)
 check("and reaches the prompt", "Blunt when it matters" in ga.build_system_prompt(), True)
 
+print("\n-- the same belief, said twice, is held once --")
+ga.store_growth("[EVOLVE: OPINION: GDScript tuple unpacking is a trap.]")
+ga.store_growth("[EVOLVE: OPINION: Tuple unpacking in GDScript for loops is a trap.]")
+opinions = ga.load_character()["opinions"]
+check("the rephrasing did not become a second opinion", len(opinions), 1)
+check("first phrasing is the one kept", "GDScript tuple unpacking is a trap." in opinions, True)
+ga.store_growth("[EVOLVE: OPINION: Rebuilding the flow field on every road change is wasteful.]")
+opinions = ga.load_character()["opinions"]
+check("a genuinely different opinion still lands", len(opinions), 2)
+check("unrelated opinions are not merged",
+      ga.already_believes("Belts should reserve before moving.", opinions), None)
+check("a rephrasing is matched to what it repeats",
+      ga.already_believes("Unpacking tuples in GDScript is a trap.", opinions),
+      "GDScript tuple unpacking is a trap.")
+
 print("\n-- skills round trip --")
 check("saved", ga.save_skill("belt-check | verify a belt | read it, check for speed"),
       "Skill 'belt-check' saved.")

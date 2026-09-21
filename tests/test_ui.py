@@ -137,7 +137,10 @@ print("\n-- the transcript keeps up with what is added to it --")
 # new block had been measured - so the view sat one message behind and a long reply
 # arrived mostly below the fold. Measured from the real scrollbar, not from the call.
 feed = ga.MessageList(ga.THEMES["dark"])
-feed.resize(700, 400)
+# Fixed, not resize(): a shown top-level grows to fit its contents, so the viewport
+# ended up taller than everything in it and the scrollbar had a range of nothing.
+# Every check below then passed by being unable to scroll at all.
+feed.setFixedSize(700, 400)
 feed.show()
 settle(8)
 bar = feed.verticalScrollBar()

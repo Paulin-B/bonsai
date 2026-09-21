@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-20-assettools"
+APP_VERSION = "2026-09-21-character"
 
 
 # Where the repo lives, for the optional files that ship beside it.

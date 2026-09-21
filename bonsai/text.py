@@ -706,6 +706,35 @@ def store_memories(text):
     return REMEMBER_RE.sub("", text).strip()
 
 
+GROWTH_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "it", "to", "of", "and", "in", "on", "for",
+    "that", "this", "with", "as", "my", "i", "you", "now", "not", "but", "so", "at",
+}
+
+
+def _growth_words(detail):
+    return {w for w in re.findall(r"[a-z']{3,}", (detail or "").lower())
+            if w not in GROWTH_STOPWORDS}
+
+
+def already_believes(detail, existing):
+    """An entry that says the same thing as `detail`, or None.
+
+    Exact matching is not enough once this fires regularly: "GDScript tuple unpacking
+    is a trap" and "tuple unpacking in GDScript for loops is a trap" are one opinion
+    held twice, and a character made of near-duplicates reads as a stuck record."""
+    incoming = _growth_words(detail)
+    if not incoming:
+        return None
+    for entry in existing:
+        held = _growth_words(entry)
+        if not held:
+            continue
+        if len(incoming & held) / min(len(incoming), len(held)) >= 0.6:
+            return entry
+    return None
+
+
 def store_growth(text):
     """Fold [EVOLVE: TRAIT|OPINION|JOKE: detail] lines into the character file."""
     character = load_character()
@@ -714,7 +743,7 @@ def store_growth(text):
     for category, detail in EVOLVE_RE.findall(text):
         key = EVOLVE_KEYS.get(category.upper())
         detail = detail.strip()
-        if key and detail and detail not in character.get(key, []):
+        if key and detail and not already_believes(detail, character.get(key, [])):
             character.setdefault(key, []).append(detail)
             character[key] = character[key][-cap:]
             changed = True
