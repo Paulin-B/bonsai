@@ -679,6 +679,12 @@ class SettingsDialog(QDialog):
                   20, 3600, 10)
         self.spin("Screen", "proactive_cooldown", "Quiet after speaking (seconds):",
                   0, 7200, 30)
+        self.spin("Screen", "proactive_worth", "Only speak when a remark rates at least:",
+                  1, 5, 1,
+                  "1-5. It rates every remark it thinks of and only ones at or above "
+                  "this get said. 3 lets through opinions and asides, and speaks about "
+                  "as often as the cooldown allows; 4 is errors and things you would "
+                  "act on, which is a few times a day; 5 is almost never.")
 
         self.hint("Memory", "Notes become markdown files if you point this at a vault; "
                             "leave it blank and they stay in JSON.")

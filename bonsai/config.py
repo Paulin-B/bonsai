@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-21-mood"
+APP_VERSION = "2026-09-21-observer"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -139,6 +139,10 @@ DEFAULTS = {
     "observer_url": "",            # blank = use server_url
     "proactive_interval": 90,      # seconds between screen checks
     "proactive_cooldown": 600,     # seconds of silence after it speaks
+    # 1-5, measured against the user's own logged screens on Qwen3-VL-30B: at 3 it
+    # remarks on about 15% of checks and catches both of two genuinely broken screens;
+    # at 4 it is 0% and catches one. The cooldown caps the rate either way.
+    "proactive_worth": 3,
     "proactive_verbose": True,     # log each check, so silence != broken
     "auto_max_rounds": 10,         # continuation rounds before auto mode gives up
     "max_continuations": 3,        # times a turn may resume itself after running out

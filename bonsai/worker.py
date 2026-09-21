@@ -14,7 +14,7 @@ from .config import (
     DEBUG_LOG_FILE, DEFAULTS, MEMORY_FILE,
 )
 from .store import (
-    all_skills, fetch_briefing, load_character, load_memory, load_trusted, MOOD_STEPS, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, shift_mood, search_vault, skills_matching, unreachable_server,
+    all_skills, character_voice, fetch_briefing, load_character, load_memory, load_screen_log, load_trusted, MOOD_STEPS, mood_line, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, shift_mood, skills_matching, unreachable_server,
 )
 from .text import (
     DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
@@ -1023,27 +1023,71 @@ class ConsolidationWorker(QThread):
             self.failed.emit(f"Consolidation failed: {exc}")
 
 
+# What this used to say, and why it was replaced: "Almost always SAY should be SILENT",
+# three conditions that all had to hold, "do not speak to be friendly", "when in doubt,
+# SILENT". Five separate discouragements, and it worked - across 193 checks in the real
+# debug log it spoke once, and the one thing it said was "Enter a name to continue",
+# which is a caption, not a remark.
+#
+# Rewording it did nothing. On seven graded screens the gentler wording spoke LESS
+# (1 of 7 against the old one's 2), because SILENT is one token and always defensible:
+# a yes/no judgement about whether to interrupt is a judgement this model will always
+# resolve the safe way, however it is asked.
+#
+# So it is not asked. It writes the remark and rates it, which are two things it is
+# good at, and the app applies the threshold - which is the same rule as everywhere
+# else here: do not ask the model for a decision, take the judgement and enforce the
+# policy in code where it can be tuned and tested. On the same graded screens the
+# rating separated cleanly: an outright parse error 4, a silent repeated failure 3,
+# an idle desktop 2.
 OBSERVER_PROMPT = (
-    "You are {name}, quietly watching over the user's shoulder while they work. You are "
-    "shown a screenshot of their screen.\n\n"
-    "Reply in exactly this format, two lines:\n"
+    "You are {name}, watching over the user's shoulder while they work. You are shown a "
+    "screenshot of their screen.\n\n"
+    "--- WHO YOU ARE ---\n{character}\n"
+    "This is the one time you speak without being spoken to, so it should sound like "
+    "you and not like a notification.\n\n"
+    "{mood}"
+    "Reply in exactly this format, three lines:\n"
     "SEEN: <one short factual line describing what is on screen - the app, the task, "
     "anything notable. This is recorded for your own memory, not shown to the user.>\n"
-    "SAY: <either the single word SILENT, or one or two short sentences to say out loud>\n\n"
-    "Almost always SAY should be SILENT. Only speak if ALL of these hold:\n"
-    "1. Something is clearly wrong, stuck, or about to cause a problem.\n"
-    "2. You can say something specific and immediately useful about it.\n"
-    "3. You have not already said it recently (see below).\n"
-    "Do not speak to be friendly, to praise, or to ask how it's going. Interrupting "
-    "someone who is concentrating is costly. When in doubt, SILENT.\n\n"
-    "--- THINGS YOU ALREADY SAID RECENTLY (do not repeat these) ---\n{recent}\n"
+    "SAY: <the remark you would make, one or two short sentences, in your own voice. "
+    "ALWAYS write one, even a weak one. Whether it actually gets said is not your "
+    "decision and you do not need to protect them from it.>\n"
+    "WORTH: <a single digit 1-5: how much that remark is worth interrupting them for>\n\n"
+    "  1 - nothing there. You are only making conversation.\n"
+    "  2 - mildly interesting. They would not miss it.\n"
+    "  3 - a real remark: a genuine opinion of yours, or something they would like to "
+    "know.\n"
+    "  4 - useful and timely. They would probably act on it.\n"
+    "  5 - something is wrong or about to go wrong and they need to know now.\n\n"
+    "Rate it honestly and low. Most screens are a 1 or a 2 and that is the expected "
+    "answer; a 5 is rare. The app will not say a low one, so scoring it up to get it "
+    "heard only means a worse remark gets through.\n\n"
+    "What a remark must never be:\n"
+    "- Never a description of the screen. They can see it. \"A YouTube video is "
+    "playing\" is a caption, and reading the UI out loud is worse.\n"
+    "- Never something you cannot actually see in THIS screenshot. The history below "
+    "is what was on screen EARLIER and may all be fixed by now - do not say an old "
+    "error is still there unless it is in front of you. Inventing continuity is worse "
+    "than having none.\n"
+    "- Never the same running joke twice in a row. A joke worked into every remark "
+    "stops being a joke and becomes a tic.\n"
+    "- No praise, no encouragement, no asking how it is going, nothing you have "
+    "already said below.\n\n"
+    "--- WHAT WAS ON SCREEN EARLIER (may be out of date) ---\n{history}\n\n"
+    "--- WHAT YOU ALREADY SAID (do not repeat) ---\n{recent}\n"
 )
 
 
 SEEN_RE = re.compile(r"SEEN:\s*(.+?)(?:\n|SAY:|$)", re.I | re.S)
 
 
-SAY_RE = re.compile(r"SAY:\s*(.+)", re.I | re.S)
+# SAY runs to the end of the line now that WORTH follows it, rather than to the end
+# of the reply.
+SAY_RE = re.compile(r"SAY:\s*(.+?)(?:\n\s*WORTH:|$)", re.I | re.S)
+
+
+WORTH_RE = re.compile(r"WORTH:\s*\**\s*([1-5])", re.I)
 
 
 class ObserverWorker(QThread):
@@ -1064,13 +1108,22 @@ class ObserverWorker(QThread):
         try:
             name = load_character().get("name", "Bonsai")
             recent = "\n".join(f"- {r}" for r in self.recent) or "- nothing yet"
+            # What they were doing before this screenshot. Without it every check is
+            # the first one it has ever made, and "you were on this an hour ago" -
+            # the remark only a thing that watches can make - is unavailable to it.
+            history = "\n".join(f"- {e['at'][11:16]} {e['note']}"
+                                for e in load_screen_log()[-8:]) or "- nothing recorded yet"
             image = capture_screen()
             payload = {
                 "messages": [{
                     "role": "user",
                     "content": [
                         {"type": "text",
-                         "text": OBSERVER_PROMPT.format(name=name, recent=recent)},
+                         "text": OBSERVER_PROMPT.format(
+                             name=name, recent=recent, history=history,
+                             character=character_voice(), mood=mood_line(),
+                             minutes=max(1, round(self.config.get(
+                                 "proactive_cooldown", 600) / 60)))},
                         {"type": "image_url",
                          "image_url": {"url": f"data:image/jpeg;base64,{image}"}},
                     ],
@@ -1112,14 +1165,28 @@ class ObserverWorker(QThread):
             # Record what was on screen regardless of whether it decides to speak.
             if seen_match:
                 record_screen(seen_match.group(1).strip())
-            elif not say_match:
-                record_screen(text.splitlines()[0][:200])  # unformatted reply, salvage it
+            elif not say_match and not re.fullmatch(
+                    r"[^A-Za-z]*SILENT[^A-Za-z]*", text.strip(), re.I):
+                # Salvage an unformatted reply as the screen note - but a bare SILENT
+                # is an answer, not a description, and 16 of them went into the screen
+                # log as if that had been what was on screen.
+                record_screen(text.splitlines()[0][:200])
 
             spoken = say_match.group(1).strip() if say_match else ""
             if self.record_only:
                 self.quiet.emit()  # only here to update the screen log
                 return
             if not spoken or re.fullmatch(r"[^A-Za-z]*SILENT[^A-Za-z]*", spoken, re.I):
+                self.quiet.emit()
+                return
+
+            # The threshold, not the model, decides. A reply with no WORTH line is
+            # from a model that did not follow the format, and an unrated remark is
+            # not worth interrupting for - the old wording is what got us one remark
+            # in 193, and guessing high here would replace that with the opposite.
+            worth_match = WORTH_RE.search(text)
+            worth = int(worth_match.group(1)) if worth_match else 0
+            if worth < self.config.get("proactive_worth", DEFAULTS["proactive_worth"]):
                 self.quiet.emit()
                 return
             text = spoken

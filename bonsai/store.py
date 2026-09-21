@@ -156,6 +156,25 @@ def shift_mood(delta, why=""):
     return value, mood_name(value)
 
 
+def character_voice():
+    """Who Bonsai is, in one block, for the prompts that are not the main one.
+
+    The proactive observer had only the name - not a trait, not an opinion, not one
+    of the jokes. It is the one place Bonsai speaks without being spoken to, which
+    makes it the place personality matters most, and it was the only prompt with no
+    personality in it at all. The single remark it ever volunteered read like a
+    caption because nothing had told it to sound like anyone."""
+    character = load_character()
+    lines = []
+    for key in ("core_traits", "learned_traits"):
+        lines += [f"- {t}" for t in character.get(key, [])]
+    for opinion in character.get("opinions", []):
+        lines.append(f"- You think: {opinion}")
+    for joke in character.get("running_jokes", []):
+        lines.append(f"- A running joke of yours: {joke}")
+    return "\n".join(lines) or "- (no character defined yet)"
+
+
 def mood_reason(counts):
     """One clause saying what a turn's mood came from, for the prompt to quote.
 
