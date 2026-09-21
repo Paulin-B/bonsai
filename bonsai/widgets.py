@@ -686,6 +686,10 @@ class SettingsDialog(QDialog):
                   "as often as the cooldown allows; 4 is errors and things you would "
                   "act on, which is a few times a day; 5 is almost never.")
 
+        self.spin("Screen", "neuro_port", "Game link port:", 1024, 65535, 1,
+                  "Games built for the Neuro API connect here to register their own "
+                  "actions, so Bonsai plays them through the game rather than by "
+                  "photographing it. 8000 is what the SDK's samples use.")
         self.spin("Screen", "play_max_steps", "Steps before a play run stops:", 5, 500, 5,
                   "How long Bonsai plays for after you switch Play on, in actions. It "
                   "stops on its own at this point so a loop cannot run all night.")

@@ -41,6 +41,9 @@ from .shell import (
 from .stage import (
     handle_stage, stop_stage,
 )
+from .neuro import (
+    NeuroServer,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -492,6 +495,7 @@ class Bonsai(QWidget):
         self.observer = None
         self.observer_timer = None
         self.player = None
+        self.gamelink = None
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -730,6 +734,14 @@ class Bonsai(QWidget):
             "Settings.")
         self.play_box.stateChanged.connect(self.on_play_toggled)
         toggles.addWidget(self.play_box)
+
+        self.gamelink_box = QCheckBox("Game link")
+        self.gamelink_box.setToolTip(
+            "Listen for games that speak the Neuro API. A game that connects tells "
+            "Bonsai what is happening and what it can do, so it plays through the "
+            "game itself instead of photographing the screen and guessing at keys.")
+        self.gamelink_box.stateChanged.connect(self.on_gamelink_toggled)
+        toggles.addWidget(self.gamelink_box)
 
         toggles.addStretch(1)
         layout.addWidget(strip)
@@ -2225,6 +2237,32 @@ class Bonsai(QWidget):
         self.play_box.blockSignals(True)
         self.play_box.setChecked(False)
         self.play_box.blockSignals(False)
+
+    def on_gamelink_toggled(self):
+        if not self.gamelink_box.isChecked():
+            if self.gamelink:
+                self.gamelink.stop()
+                self.gamelink = None
+            self.log("--- game link off ---")
+            return
+        self.gamelink = NeuroServer(dict(self.settings))
+        self.gamelink.listening.connect(
+            lambda port: self.log(f"--- game link listening on ws://127.0.0.1:{port} ---"))
+        self.gamelink.game_connected.connect(
+            lambda name: self.log(f"\U0001F3AE {name} connected", "green"))
+        self.gamelink.game_gone.connect(lambda name: self.log(f"\U0001F3AE {name} left"))
+        self.gamelink.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
+        self.gamelink.said.connect(
+            lambda text: self.messages.add_assistant(text, unprompted=True))
+        self.gamelink.failed.connect(self.on_gamelink_failed)
+        self.gamelink.start()
+
+    def on_gamelink_failed(self, why):
+        self.log(why, "red")
+        self.gamelink_box.blockSignals(True)
+        self.gamelink_box.setChecked(False)
+        self.gamelink_box.blockSignals(False)
+        self.gamelink = None
 
     def observer_tick(self):
         # Never interrupt an in-flight request, a permission dialog, or the quiet period.

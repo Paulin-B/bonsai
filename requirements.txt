@@ -9,3 +9,4 @@ pyspellchecker>=0.8      # red underlines in the input box
 PyYAML>=6.0              # syntax checking for .yaml files
 tree-sitter>=0.23        # syntax checking and reference tracking for ~40 languages
 tree-sitter-language-pack>=1.0
+websockets>=12.0         # the Neuro API game link, so games can drive Bonsai directly

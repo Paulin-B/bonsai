@@ -12,6 +12,7 @@ from . import codeintel  # noqa: F401
 from . import media  # noqa: F401
 from . import shell  # noqa: F401
 from . import stage  # noqa: F401
+from . import neuro  # noqa: F401
 from . import turns  # noqa: F401
 from . import chats  # noqa: F401
 from . import prompt  # noqa: F401
@@ -28,6 +29,7 @@ from .codeintel import *  # noqa: F401,F403
 from .media import *  # noqa: F401,F403
 from .shell import *  # noqa: F401,F403
 from .stage import *  # noqa: F401,F403
+from .neuro import *  # noqa: F401,F403
 from .turns import *  # noqa: F401,F403
 from .chats import *  # noqa: F401,F403
 from .prompt import *  # noqa: F401,F403
