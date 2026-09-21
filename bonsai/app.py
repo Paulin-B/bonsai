@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
+    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_mood, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, RECORD_HEADER, TASK_MUTATION_RE, invented_files, invented_recall, is_record_echo, narrate_trace, plain_text, same_as_last_time, unsearched_memory, unverified_files,
@@ -46,7 +46,7 @@ from .worker import (
 )
 from .theme import (
     DEFAULT_FONT, DEFAULT_THEME, NEUTRAL_DARK, NEUTRAL_LIGHT, NOTE_COLOURS, PALETTES,
-    THEMES, is_dark, markdown_css, palette, style_rendered_document, stylesheet,
+    THEMES, is_dark, markdown_css, mood_colour, palette, style_rendered_document, stylesheet,
 )
 from .widgets import (
     AttachmentBar, InputBox, PreviewPane, SettingsDialog, SkillDrawer,
@@ -167,6 +167,15 @@ class BonsaiGrowth(QLabel):
         self.cells, self.width_cells, self.height_cells = bonsai_cells(BONSAI_SHAPES[0])
         self.shown = len(self.cells)
         self.repaint_tree()
+        self.show_mood()
+
+    def show_mood(self):
+        """Wear the mood. Read from disk rather than passed in, because the mood
+        outlives the window and is the same one the prompt was built from."""
+        value, name, why = load_mood()
+        self.setStyleSheet(f"#bonsaiGrowth {{ color: {mood_colour(value)}; "
+                           "background: transparent; }")
+        self.setToolTip(f"{name.capitalize()}{f' - {why}' if why else ''}")
 
     def repaint_tree(self):
         grid = [[" "] * self.width_cells for _ in range(self.height_cells)]
@@ -192,6 +201,9 @@ class BonsaiGrowth(QLabel):
         self.timer.stop()
         self.shown = len(self.cells)
         self.repaint_tree()
+        # The turn that just ended is what moved the mood, so this is the moment it
+        # is worth looking at the tree again.
+        self.show_mood()
 
 
 class MarkdownView(QTextBrowser):
@@ -1460,6 +1472,10 @@ class Bonsai(QWidget):
             app.setStyleSheet(sheet)
         else:
             self.setStyleSheet(sheet)
+        # The tree carries its own colour, so it has to be told the palette moved
+        # under it or it keeps the old theme's grey.
+        if getattr(self, "bonsai", None) is not None:
+            self.bonsai.show_mood()
 
     # -- chats --
 

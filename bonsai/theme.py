@@ -429,6 +429,28 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 """
 
 
+# The tree is the only part of the window with no job, which makes it the one place a
+# mood can show without getting in the way of anything. Blended from the theme's own
+# muted colour rather than set outright, so a tinted tree still belongs to the theme
+# it is sitting in - and the tint is capped well short of the full hue, because this
+# is meant to be noticed on the second look, not the first.
+MOOD_TINTS = {"up": "#4c9f68", "down": "#c2695c"}
+MOOD_TINT_MAX = 0.7
+
+
+def mood_colour(value, theme=None):
+    """What colour the tree is at this mood. Neutral returns the ordinary muted grey."""
+    colours = palette(theme)
+    if not value:
+        return colours["muted"]
+    towards = MOOD_TINTS["up" if value > 0 else "down"]
+    tinted = _blend(colours["muted"], towards, min(abs(value), 1.0) * MOOD_TINT_MAX)
+    # A mood is never worth making the tree harder to see than it was.
+    if contrast(tinted, colours["bg"]) < contrast(colours["muted"], colours["bg"]) * 0.75:
+        return _blend(colours["muted"], towards, MOOD_TINT_MAX / 2)
+    return tinted
+
+
 def markdown_css(c):
     """Styling for a rendered reply. Qt rich text takes a small CSS subset - no
     border-radius, no flexbox - so this stays to colours, borders and spacing."""

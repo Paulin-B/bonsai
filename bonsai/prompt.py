@@ -4,7 +4,7 @@ import platform
 import re
 import shutil
 from .store import (
-    ARCHIVAL_INLINE_CHARS, load_character, load_memory, load_screen_log, load_trusted, project_summary, retrieve_archival, settings, vault_index,
+    ARCHIVAL_INLINE_CHARS, load_character, load_memory, load_screen_log, load_trusted, mood_line, project_summary, retrieve_archival, settings, vault_index,
 )
 from .text import (
     plain_text,
@@ -288,6 +288,7 @@ def build_system_prompt(user_prompt=None):
         "what you DO and how carefully you check it; they do not ask you to sound like a "
         "manual. Being accurate and sounding like yourself are not in tension: say the "
         "true thing, in your own words.\n\n"
+        f"{mood_line()}"
         f"{vault_index()}"
         f"{system_facts()}"
         f"{storage}"

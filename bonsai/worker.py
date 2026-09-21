@@ -14,7 +14,7 @@ from .config import (
     DEBUG_LOG_FILE, DEFAULTS, MEMORY_FILE,
 )
 from .store import (
-    all_skills, fetch_briefing, load_character, load_memory, load_trusted, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, skills_matching, unreachable_server,
+    all_skills, fetch_briefing, load_character, load_memory, load_trusted, MOOD_STEPS, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, shift_mood, search_vault, skills_matching, unreachable_server,
 )
 from .text import (
     DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
@@ -87,6 +87,22 @@ class Worker(QThread):
         self._gate = None
         self._granted = False
         self._cancelled = False
+
+    def note_mood(self, kind):
+        """Remember that something went well or badly. Counted here, applied once at
+        the end of the turn - a mood that wrote to disk on every tool call would be
+        thirty writes a turn to say one thing."""
+        if kind:
+            self.mood_events[kind] = self.mood_events.get(kind, 0) + 1
+
+    def settle_mood(self):
+        """Fold the turn into the mood that outlives it. Runs on every exit, crashes
+        included: a turn that fell over after five refusals still happened."""
+        if not self.mood_events:
+            return              # a turn with no tool work says nothing about the day
+        total = sum(MOOD_STEPS.get(kind, 0.0) * count
+                    for kind, count in self.mood_events.items())
+        shift_mood(total, mood_reason(self.mood_events))
 
     def context_is_tight(self):
         """Whether another step would risk the server refusing the request outright.
@@ -487,6 +503,7 @@ class Worker(QThread):
 
     def run(self):
         try:
+            self.mood_events = {}
             system_prompt = build_system_prompt(self.prompt)
             max_steps = self.config.get("max_tool_steps", 12)
             label = self.model_name()
@@ -668,7 +685,8 @@ class Worker(QThread):
                 repeats = call_counts.get(signature, 0)
                 call_counts[signature] = repeats + 1
 
-                if blocked_as_repeat(name, repeats, last_failed):
+                not_run = blocked_as_repeat(name, repeats, last_failed)
+                if not_run:
                     # Warning about the repeat twice changed nothing, so this one simply
                     # is not run. A single refused TASK ADD otherwise looped 180 times.
                     result = ("[Not run: you have already made this exact call with these "
@@ -687,6 +705,8 @@ class Worker(QThread):
                 # going nowhere, whether or not the calls are identical.
                 refusals = refusals + 1 if result.startswith("[") else 0
                 last_failed = result.startswith("[")
+                self.note_mood("blocked" if not_run else
+                               "refused" if last_failed else "")
 
                 if name in MUTATING_TOOLS:
                     target = mutation_target(name, argument)
@@ -695,9 +715,11 @@ class Worker(QThread):
                     else:
                         unfinished.pop(target, None)   # a retry landed it after all
                         changed = True
+                        self.note_mood("landed")
                         record_project_file(target)
                 if name == "TASK" and argument.strip().upper().startswith("DONE"):
                     closed_task = True
+                    self.note_mood("closed")
 
                 self.active_tools.add(name.lower())
                 summary = result.splitlines()[0] if result.splitlines() else ""
@@ -714,6 +736,7 @@ class Worker(QThread):
 
                 if refusals >= MAX_CONSECUTIVE_REFUSALS:
                     looping = True
+                    self.note_mood("looping")
                     break
 
                 results.append({"name": name, "argument": argument,
@@ -857,6 +880,8 @@ class Worker(QThread):
             # was invisible after the fact.
             debug_note("CRASH", traceback.format_exc())
             self.failed.emit(f"Error: {exc}")
+        finally:
+            self.settle_mood()
 
 
 CONSOLIDATE_PROMPT = (

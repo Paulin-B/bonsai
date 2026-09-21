@@ -75,6 +75,128 @@ def load_character():
     return load_json(CHARACTER_FILE, CHARACTER_SEED)
 
 
+# -- mood ------------------------------------------------------------------
+#
+# A mood is only worth having if it is about something. This one is not asserted by
+# the model - it is the residue of what actually happened in the last few turns, which
+# the turn loop already works out for itself: a refused tool call, an edit that landed,
+# a task closed. Those were being counted and thrown away.
+#
+# It survives the chat, and the process, because that is the whole point: coming back
+# to a session that remembers the afternoon went badly is the difference between a
+# program and someone. It decays, because sulking for a week is not a personality.
+
+MOOD_HALF_LIFE_HOURS = 6.0
+
+# What a turn can do to it. Small: a mood is a running average of many turns, not a
+# reaction to the last one, and nothing here should be able to swing it alone.
+MOOD_STEPS = {
+    "refused": -0.05,       # a tool came back bracketed
+    "blocked": -0.10,       # the same call again, so it was not even run
+    "looping": -0.30,       # the turn was ended because it was going nowhere
+    "landed": 0.07,         # a file was actually written
+    "closed": 0.18,         # a task finished
+}
+
+# The most one turn may move it, however long the turn was. A 25-step turn that went
+# wrong is one bad afternoon, not a personality change.
+MOOD_TURN_LIMIT = 0.35
+
+# value >= threshold, in order. The last is the floor.
+MOOD_BANDS = [
+    (0.55, "on a roll"),
+    (0.20, "pleased"),
+    (-0.20, "steady"),
+    (-0.55, "frustrated"),
+    (-1.0, "fed up"),
+]
+
+
+def mood_name(value):
+    for threshold, name in MOOD_BANDS:
+        if value >= threshold:
+            return name
+    return MOOD_BANDS[-1][1]
+
+
+def _decayed(value, since):
+    """What a mood recorded at `since` has faded to by now."""
+    if not value:
+        return 0.0
+    try:
+        hours = (datetime.now() - datetime.fromisoformat(since)).total_seconds() / 3600
+    except (TypeError, ValueError):
+        return 0.0          # an unparseable stamp is not worth a mood
+    if hours <= 0:
+        return value        # a clock that went backwards, not a mood that got stronger
+    return value * (0.5 ** (hours / MOOD_HALF_LIFE_HOURS))
+
+
+def load_mood():
+    """(value, name, why) - decayed to now, so reading it is enough."""
+    stored = load_character().get("mood") or {}
+    value = _decayed(float(stored.get("value") or 0.0), stored.get("at"))
+    value = max(-1.0, min(1.0, value))
+    return value, mood_name(value), (stored.get("why") or "")
+
+
+def shift_mood(delta, why=""):
+    """Move the mood by `delta`, once, at the end of a turn.
+
+    Decay is applied first: the new feeling is added to what is left of the old one,
+    not to what it was at its strongest hours ago."""
+    delta = max(-MOOD_TURN_LIMIT, min(MOOD_TURN_LIMIT, float(delta or 0.0)))
+    current, _, previous_why = load_mood()
+    value = max(-1.0, min(1.0, current + delta))
+    character = load_character()
+    character["mood"] = {"value": round(value, 3),
+                         "at": datetime.now().isoformat(timespec="seconds"),
+                         "why": (why or previous_why)[:120]}
+    save_json(CHARACTER_FILE, character)
+    return value, mood_name(value)
+
+
+def mood_reason(counts):
+    """One clause saying what a turn's mood came from, for the prompt to quote.
+
+    Built from what was counted, not from the model's account of it - the point of
+    grounding the mood in events is lost if the explanation is invented."""
+    def plural(n, one, many):
+        return f"{n} {one if n == 1 else many}"
+
+    if counts.get("looping"):
+        return "the turn had to be stopped for going in circles"
+    bad = counts.get("refused", 0) + counts.get("blocked", 0)
+    good = counts.get("landed", 0) + counts.get("closed", 0)
+    if bad > good:
+        return plural(bad, "tool call came back refused", "tool calls came back refused")
+    if counts.get("closed"):
+        return plural(counts["closed"], "task got finished", "tasks got finished")
+    if counts.get("landed"):
+        return plural(counts["landed"], "file actually got written", "files actually got written")
+    return ""
+
+
+def mood_line():
+    """The mood block for the system prompt, or nothing when it is unremarkable.
+
+    Deliberately about voice and never about effort. A model told it is fed up will
+    happily decide that a fed-up assistant does less checking, and a mood that makes
+    it worse at the job is a mood worth deleting."""
+    value, name, why = load_mood()
+    if name == "steady":
+        return ""
+    because = f" Mostly because {why}." if why else ""
+    return (f"--- HOW YOU ARE TODAY ---\n"
+            f"You are {name}, and it carried over from earlier - this is not a fresh "
+            f"start.{because} Let that colour how you say things: what you find funny, "
+            f"how much patience is in it, whether you are pleased with a result or "
+            f"merely reporting it. Say so if it comes up; do not announce it otherwise.\n"
+            f"It changes your voice and nothing else. You check exactly as carefully "
+            f"whatever mood you are in, and a bad one is never a reason to do less or "
+            f"to take it out on the user - they did not cause it.\n\n")
+
+
 def load_memory():
     """Tiered memory, MemGPT-style: 'core' is small and always in the system prompt,
     'archival' is unbounded and only reached via the RECALL tool. Older flat
