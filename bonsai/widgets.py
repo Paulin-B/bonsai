@@ -686,6 +686,14 @@ class SettingsDialog(QDialog):
                   "as often as the cooldown allows; 4 is errors and things you would "
                   "act on, which is a few times a day; 5 is almost never.")
 
+        self.spin("Screen", "play_max_steps", "Steps before a play run stops:", 5, 500, 5,
+                  "How long Bonsai plays for after you switch Play on, in actions. It "
+                  "stops on its own at this point so a loop cannot run all night.")
+        self.spin("Screen", "play_step_seconds", "Pause after each play action (s):",
+                  0, 30, 1,
+                  "Time to let the game respond before looking again. Too short and it "
+                  "photographs the screen mid-transition and thinks nothing happened.")
+
         self.hint("Memory", "Notes become markdown files if you point this at a vault; "
                             "leave it blank and they stay in JSON.")
         self.line("Memory", "vault_path", "Vault folder:")

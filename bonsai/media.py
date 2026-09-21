@@ -597,6 +597,32 @@ def encode_frame(image):
     return base64.b64encode(buffer.getvalue()).decode()
 
 
+def frame_change(before, after, grid=32):
+    """How much two encoded frames differ, 0.0 to 1.0.
+
+    The loop that drives a game needs this because a keypress that did nothing
+    returns success just as happily as one that worked - xdotool reports that it sent
+    the key, not that anything received it. Comparing the pictures is the only way to
+    find out, which is the same rule the rest of the app runs on.
+
+    Exact equality is no use: a game animates, so consecutive frames always differ by
+    a little. This is the mean absolute difference over a small greyscale grid, so
+    idle animation lands near zero and a screen that actually turned over does not."""
+    if not before or not after:
+        return 1.0
+    if before == after:
+        return 0.0                  # identical encodings, so an identical picture
+    try:
+        shrunk = []
+        for encoded in (before, after):
+            with Image.open(BytesIO(base64.b64decode(encoded))) as image:
+                shrunk.append(image.convert("L").resize((grid, grid), Image.BILINEAR))
+        a, b = (list(image.getdata()) for image in shrunk)
+    except Exception:
+        return 1.0                  # unreadable: assume it changed rather than claim it did not
+    return sum(abs(x - y) for x, y in zip(a, b)) / (len(a) * 255)
+
+
 def qimage_to_pil(image):
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)

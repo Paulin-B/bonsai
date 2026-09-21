@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-21-observer"
+APP_VERSION = "2026-09-21-play"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -201,6 +201,8 @@ DEFAULTS = {
     # How far PLAY's keys and clicks may reach: "own" (only windows Bonsai opened),
     # "approved" (any window you say yes to), "any" (no check at all).
     "play_scope": "own",
+    "play_max_steps": 60,          # steps before a play run stops on its own
+    "play_step_seconds": 2,        # pause after each action, to let the game respond
     "sandbox_commands": True,
     "sandbox_network": False,
     # Choosing a tool wants a steady hand; talking to you does not. At 1.5 the model

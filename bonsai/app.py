@@ -39,10 +39,11 @@ from .shell import (
     stop_all_background,
 )
 from .stage import (
-    stop_stage,
+    handle_stage, stop_stage,
 )
 from .worker import (
-    BriefingWorker, ConsolidationWorker, ObserverWorker, SkillLearner, Worker,
+    BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
+    Worker,
 )
 from .theme import (
     DEFAULT_FONT, DEFAULT_THEME, NEUTRAL_DARK, NEUTRAL_LIGHT, NOTE_COLOURS, PALETTES,
@@ -490,6 +491,7 @@ class Bonsai(QWidget):
         self.health_elapsed = 0
         self.observer = None
         self.observer_timer = None
+        self.player = None
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -719,6 +721,15 @@ class Bonsai(QWidget):
             "looks wrong. Off by default; interval and quiet period are in Settings.")
         self.proactive_box.stateChanged.connect(self.on_proactive_toggled)
         toggles.addWidget(self.proactive_box)
+
+        self.play_box = QCheckBox("Play")
+        self.play_box.setToolTip(
+            "Bonsai plays whatever is running on the stage - looking, pressing "
+            "something, seeing what happened, and talking about it. Ask it to start a "
+            "game on the stage first. It stops on its own after the step limit in "
+            "Settings.")
+        self.play_box.stateChanged.connect(self.on_play_toggled)
+        toggles.addWidget(self.play_box)
 
         toggles.addStretch(1)
         layout.addWidget(strip)
@@ -2185,6 +2196,35 @@ class Bonsai(QWidget):
                 self.observer_timer.stop()
             self.observer_timer = None
             self.log("--- proactive mode off ---")
+
+    def on_play_toggled(self):
+        if not self.play_box.isChecked():
+            if self.player and self.player.isRunning():
+                self.player.cancel()
+            return
+        # Playing needs something to play. Saying so beats starting a loop that
+        # photographs an empty display sixty times.
+        if handle_stage("STATUS").startswith("(no stage"):
+            self.log("Nothing is on the stage - ask me to start a game there first, "
+                     "then switch Play on.", "orange")
+            self.play_box.blockSignals(True)
+            self.play_box.setChecked(False)
+            self.play_box.blockSignals(False)
+            return
+        self.player = PlayWorker(dict(self.settings))
+        self.player.comment.connect(
+            lambda text: self.messages.add_assistant(text, unprompted=True))
+        self.player.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
+        self.player.stopped.connect(self.on_play_stopped)
+        self.player.failed.connect(self.on_play_stopped)
+        self.player.start()
+        self.log(f"--- playing (up to {self.settings.get('play_max_steps', 60)} steps) ---")
+
+    def on_play_stopped(self, why):
+        self.log(f"--- play stopped: {why} ---")
+        self.play_box.blockSignals(True)
+        self.play_box.setChecked(False)
+        self.play_box.blockSignals(False)
 
     def observer_tick(self):
         # Never interrupt an in-flight request, a permission dialog, or the quiet period.

@@ -1,6 +1,7 @@
 """The turn loop and the background workers."""
 
 import json
+import time
 import re
 import traceback
 import threading
@@ -17,7 +18,7 @@ from .store import (
     all_skills, character_voice, fetch_briefing, load_character, load_memory, load_screen_log, load_trusted, MOOD_STEPS, mood_line, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, shift_mood, skills_matching, unreachable_server,
 )
 from .text import (
-    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, already_believes, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -32,7 +33,7 @@ from .stage import (
     handle_stage, stage_look,
 )
 from .media import (
-    LOOK_ALIASES, capture_screen, look_at, make_chart,
+    LOOK_ALIASES, capture_screen, frame_change, look_at, make_chart,
 )
 from .turns import (
     CONTEXT_SAFETY, LEARN_SKILL_PROMPT, accept_learned_skill, handle_task, handoff_from_trace, parse_handoff, save_skill, use_skill,
@@ -1195,6 +1196,182 @@ class ObserverWorker(QThread):
             self.comment.emit(text)
         except Exception as exc:
             self.failed.emit(f"Observer failed: {exc}")
+
+
+# Actions the play loop is allowed. Driving the game, not running the machine: START
+# would let a loop nobody is watching launch programs, and STOP would let it close the
+# thing it is supposed to be playing. Input only, and input on the stage goes to the
+# nested display and nowhere near the user's desktop.
+PLAY_ACTIONS = {"KEY", "HOLD", "TYPE", "CLICK", "MOVE", "POINT", "NOTHING", "WAIT"}
+
+
+# Below this, the picture did not really change. Calibrated on rendered frames: a
+# sprite nudged two pixels scores 0.0007 and a scene turning over scores 0.014, so
+# idle animation sits well under it and a screen that actually responded does not.
+PLAY_STILL = 0.004
+
+
+PLAY_PROMPT = (
+    "You are {name}, playing a game. You are shown what is on the screen right now.\n\n"
+    "--- WHO YOU ARE ---\n{character}\n"
+    "You are playing for the fun of it, with someone watching. Talk like it.\n\n"
+    "{mood}"
+    "{goal}"
+    "Reply in exactly this format, three lines:\n"
+    "SEE: <what is actually happening on screen right now - one line, for your own "
+    "notes. Describe only what you can see.>\n"
+    "DO: <ONE action, from this list exactly>\n"
+    "    KEY <key>            - a keypress, e.g. KEY space, KEY Return, KEY ctrl+s\n"
+    "    HOLD <key> <ms>      - hold it down, e.g. HOLD Right 600 to walk a bit\n"
+    "    TYPE <text>          - type some text\n"
+    "    MOVE <x> <y>         - put the pointer there, in window coordinates\n"
+    "    CLICK <button> [x y] - click, optionally moving there first\n"
+    "    NOTHING              - watch this frame out and act on the next one\n"
+    "SAY: <what you say out loud about it, in your own voice - or the word NOTHING. "
+    "You are being watched, so react, complain, gloat, guess what happens next. Do "
+    "not narrate your own keypresses: they can see the screen too.>\n\n"
+    "One action per turn. You will see the result and get another go, so do not plan "
+    "a sequence - take the next step and look again.\n"
+    "Only say what you can actually see. If you cannot tell what is happening, say "
+    "that; guessing at a screen you cannot read is how a run goes wrong and stays "
+    "wrong.\n\n"
+    "--- THE LAST FEW THINGS YOU DID ---\n{recent}\n"
+)
+
+
+class PlayWorker(QThread):
+    """Plays whatever is on the stage: look, act, say something, look again.
+
+    The point of the loop is the last part of that sentence - it checks what its own
+    action did to the screen rather than trusting that a keypress landed. xdotool
+    reports that it sent the key, which is not the same as the game receiving it, and
+    a loop that cannot tell the difference spends forty steps pressing a dead button
+    and narrating progress."""
+
+    comment = pyqtSignal(str)       # what it says out loud
+    acted = pyqtSignal(str)         # one line per step, for the log
+    stopped = pyqtSignal(str)       # why the run ended
+    failed = pyqtSignal(str)
+
+    def __init__(self, config, goal=""):
+        super().__init__()
+        self.config = config
+        self.goal = goal.strip()
+        self._cancelled = False
+        self.history = []           # (action, outcome, change) per step
+
+    def cancel(self):
+        self._cancelled = True
+
+    def ask(self, prompt, frame):
+        payload = {
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/jpeg;base64,{frame}"}}]}],
+            "max_tokens": 400,
+            "temperature": self.config.get("temperature", 1.0),
+            "chat_template_kwargs": {"enable_thinking": False},
+            "cache_prompt": False,
+        }
+        url = self.config.get("server_url", DEFAULTS["server_url"])
+        response = requests.post(url, json=payload, timeout=120)
+        if response.status_code != 200:
+            raise RuntimeError(f"API error {response.status_code}")
+        return denoise(response.json()["choices"][0]["message"]["content"] or "")
+
+    def recent_block(self):
+        if not self.history:
+            return "- nothing yet, this is your first look"
+        lines = []
+        for action, outcome, change in self.history[-6:]:
+            moved = "the screen changed" if change > PLAY_STILL else "NOTHING CHANGED"
+            lines.append(f"- {action} -> {outcome} ({moved})")
+        stuck = [c for _, _, c in self.history[-3:]]
+        if len(stuck) == 3 and all(c <= PLAY_STILL for c in stuck):
+            lines.append("- Your last three actions changed nothing on screen. That "
+                         "key is not reaching the game, or the game is waiting for "
+                         "something else. Try a different one rather than that one "
+                         "again.")
+        return "\n".join(lines)
+
+    def run(self):
+        try:
+            steps = self.config.get("play_max_steps", 60)
+            pause = self.config.get("play_step_seconds", 2)
+            said = []
+            for step in range(steps):
+                if self._cancelled:
+                    self.stopped.emit("Stopped.")
+                    return
+                note, frame = stage_look()
+                if not frame:
+                    self.stopped.emit(note if note.startswith("[") else
+                                      "[The stage is gone, so there is nothing to play.]")
+                    return
+
+                goal = (f"You are trying to: {self.goal}\n\n" if self.goal else "")
+                reply = self.ask(PLAY_PROMPT.format(
+                    name=load_character().get("name", "Bonsai"),
+                    character=character_voice(), mood=mood_line(),
+                    goal=goal, recent=self.recent_block()), frame)
+                debug_note("PLAY", reply)
+
+                action = (PLAY_DO_RE.search(reply) or _Empty).group(1).strip()
+                spoken = (PLAY_SAY_RE.search(reply) or _Empty).group(1).strip()
+                verb = action.split(" ", 1)[0].upper() if action else "NOTHING"
+                if verb not in PLAY_ACTIONS:
+                    outcome = (f"[{verb} is not something you can do here. Use KEY, "
+                               "HOLD, TYPE, MOVE, CLICK or NOTHING.]")
+                elif verb in ("NOTHING", "WAIT"):
+                    outcome = "watched a frame"
+                else:
+                    outcome = handle_stage(action)
+                self.acted.emit(f"{action or 'NOTHING'} -> {outcome.splitlines()[0][:80]}")
+
+                # Look again and measure. This is the whole reason the loop exists in
+                # code rather than in the prompt: the model cannot check its own key
+                # landed, and would not be told if it had not.
+                time.sleep(pause)
+                _, after = stage_look()
+                change = frame_change(frame, after)
+                self.history.append((action or "NOTHING", outcome.splitlines()[0][:70],
+                                     change))
+
+                # Same rule as the character file: saying the same thing in slightly
+                # different words is saying it twice. It won the test game and then
+                # announced the win three times running.
+                if (spoken and spoken.upper() != "NOTHING"
+                        and not already_believes(spoken, said[-4:])):
+                    said.append(spoken)
+                    self.comment.emit(spoken[:400])
+
+                # Nothing is happening and it is not trying to make anything happen -
+                # the game is over, or finished with it. Burning the rest of the budget
+                # photographing a still screen is not playing.
+                idle = self.history[-3:]
+                if len(idle) == 3 and all(
+                        c <= PLAY_STILL and a.split(" ")[0].upper() in ("NOTHING", "WAIT")
+                        for a, _, c in idle):
+                    self.stopped.emit("Nothing is happening on screen any more, so "
+                                      "that is a good place to stop.")
+                    return
+            self.stopped.emit(f"Played {steps} steps. Turn it back on for more.")
+        except Exception as exc:
+            debug_note("CRASH", traceback.format_exc())
+            self.failed.emit(f"Playing failed: {exc}")
+
+
+class _Empty:
+    @staticmethod
+    def group(_):
+        return ""
+
+
+PLAY_DO_RE = re.compile(r"^\s*DO:\s*(.+?)$", re.I | re.M)
+
+
+PLAY_SAY_RE = re.compile(r"^\s*SAY:\s*(.+?)$", re.I | re.M)
 
 
 class BriefingWorker(QThread):
