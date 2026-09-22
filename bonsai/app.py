@@ -44,6 +44,9 @@ from .stage import (
 from .neuro import (
     NeuroServer,
 )
+from .speech import (
+    Speaker, available_engine, speakable, why_silent,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -496,6 +499,7 @@ class Bonsai(QWidget):
         self.observer_timer = None
         self.player = None
         self.gamelink = None
+        self.speaker = None
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -742,6 +746,15 @@ class Bonsai(QWidget):
             "game itself instead of photographing the screen and guessing at keys.")
         self.gamelink_box.stateChanged.connect(self.on_gamelink_toggled)
         toggles.addWidget(self.gamelink_box)
+
+        self.speak_box = QCheckBox("Speak")
+        self.speak_box.setToolTip(
+            "Say answers out loud. Code, tables and paths are not read out - the prose "
+            "is. Which engine is used, and how much is spoken, are on the Voice page "
+            "in Settings.")
+        self.speak_box.setChecked(bool(self.settings.get("speak_replies", False)))
+        self.speak_box.stateChanged.connect(self.on_speak_toggled)
+        toggles.addWidget(self.speak_box)
 
         toggles.addStretch(1)
         layout.addWidget(strip)
@@ -1868,6 +1881,7 @@ class Bonsai(QWidget):
                      "than any work, and no tool ran.)")
             trace, unfinished, hit_step_limit = "", "", False
         self.messages.add_assistant(reply)
+        self.speak(reply)
         if unfinished:
             # The strongest signal available: the app itself refused or failed the
             # change, and nothing since made it happen.
@@ -2151,6 +2165,10 @@ class Bonsai(QWidget):
             self._context_warned = False
 
     def on_stop_clicked(self):
+        # Stop means stop. A voice carrying on for another twenty seconds after the
+        # button is the most annoying thing this feature could do.
+        if self.speaker is not None:
+            self.speaker.silence()
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.status.setText("Cancelling...")
@@ -2225,7 +2243,8 @@ class Bonsai(QWidget):
             return
         self.player = PlayWorker(dict(self.settings))
         self.player.comment.connect(
-            lambda text: self.messages.add_assistant(text, unprompted=True))
+            lambda text: (self.messages.add_assistant(text, unprompted=True),
+                          self.speak(text, unprompted=True)))
         self.player.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
         self.player.stopped.connect(self.on_play_stopped)
         self.player.failed.connect(self.on_play_stopped)
@@ -2237,6 +2256,37 @@ class Bonsai(QWidget):
         self.play_box.blockSignals(True)
         self.play_box.setChecked(False)
         self.play_box.blockSignals(False)
+
+    def on_speak_toggled(self):
+        self.settings["speak_replies"] = self.speak_box.isChecked()
+        save_settings(self.settings)
+        if not self.speak_box.isChecked():
+            if self.speaker is not None:
+                self.speaker.silence()
+            self.log("--- not speaking ---")
+            return
+        engine = available_engine()
+        if engine is None:
+            # Saying why beats a toggle that looks on and makes no sound.
+            self.log(why_silent(), "orange")
+            self.speak_box.blockSignals(True)
+            self.speak_box.setChecked(False)
+            self.speak_box.blockSignals(False)
+            self.settings["speak_replies"] = False
+            save_settings(self.settings)
+            return
+        self.log(f"--- speaking, using {engine} ---")
+
+    def speak(self, text, unprompted=False):
+        """Say something, if speaking is on and this kind of line is wanted."""
+        if not self.settings.get("speak_replies", False):
+            return
+        if unprompted and not self.settings.get("speak_unprompted", True):
+            return
+        if self.speaker is None:
+            self.speaker = Speaker()
+            self.speaker.failed.connect(lambda why: self.log(why, "orange"))
+        self.speaker.say(text)
 
     def on_gamelink_toggled(self):
         if not self.gamelink_box.isChecked():
@@ -2253,7 +2303,8 @@ class Bonsai(QWidget):
         self.gamelink.game_gone.connect(lambda name: self.log(f"\U0001F3AE {name} left"))
         self.gamelink.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
         self.gamelink.said.connect(
-            lambda text: self.messages.add_assistant(text, unprompted=True))
+            lambda text: (self.messages.add_assistant(text, unprompted=True),
+                          self.speak(text, unprompted=True)))
         self.gamelink.failed.connect(self.on_gamelink_failed)
         self.gamelink.start()
 
@@ -2286,6 +2337,7 @@ class Bonsai(QWidget):
 
     def on_observer_comment(self, text):
         self.messages.add_assistant(text, unprompted=True)
+        self.speak(text, unprompted=True)
         self.observer_recent = (self.observer_recent + [text])[-5:]
         self.observer_muted_until = time.time() + self.settings.get("proactive_cooldown", 600)
 
@@ -2500,6 +2552,9 @@ class Bonsai(QWidget):
         # nobody can see to stop.
         for name in stop_all_background():
             self.log(f"Stopped background process {name}.")
+        if self.speaker is not None:
+            self.speaker.stop()
+            self.speaker.wait(1500)
         closed = stop_stage()
         if closed:
             self.log(f"Closed the stage on {closed}.")

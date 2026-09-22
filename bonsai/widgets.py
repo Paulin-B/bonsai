@@ -446,8 +446,8 @@ class SettingsDialog(QDialog):
     """Settings, grouped. One flat list of forty fields meant that finding anything
     required reading all of it, and related options sat nowhere near each other."""
 
-    PAGES = ["Model", "Appearance", "Briefing", "Screen", "Memory", "Autonomy",
-             "Services"]
+    PAGES = ["Model", "Appearance", "Voice", "Briefing", "Screen", "Memory",
+             "Autonomy", "Services"]
 
     def __init__(self, current, parent=None):
         super().__init__(parent)
@@ -685,6 +685,24 @@ class SettingsDialog(QDialog):
                   "this get said. 3 lets through opinions and asides, and speaks about "
                   "as often as the cooldown allows; 4 is errors and things you would "
                   "act on, which is a few times a day; 5 is almost never.")
+
+        self.hint("Voice", "Bonsai can say its answers out loud. piper sounds like a "
+                           "person and runs on the CPU, so it does not compete with "
+                           "the model for the GPU; espeak-ng needs no model file and "
+                           "sounds like it. With neither installed, this stays quiet "
+                           "and says so in the log.")
+        self.check("Voice", "speak_replies", "Say answers out loud")
+        self.check("Voice", "speak_unprompted",
+                   "Also say the things it volunteers (proactive remarks, game chat)")
+        self.line("Voice", "speech_model", "Voice model (piper .onnx):",
+                  "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
+                  ".onnx.json beside it.")
+        self.decimal("Voice", "speech_rate", "Speaking rate:", 0.5, 2.5, 0.1,
+                     "1.0 is the engine's normal speed. Higher is faster.")
+        self.spin("Voice", "max_spoken_chars", "Speak at most (characters):",
+                  100, 5000, 50,
+                  "Long answers are previewed out loud and left on screen. It stops at "
+                  "a sentence, not mid-word.")
 
         self.spin("Screen", "neuro_port", "Game link port:", 1024, 65535, 1,
                   "Games built for the Neuro API connect here to register their own "
