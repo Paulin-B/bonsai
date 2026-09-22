@@ -56,6 +56,9 @@ from .hotkey import (
 from .avatar import (
     AvatarWindow,
 )
+from .vrmview import (
+    use_software_rendering,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -2725,6 +2728,8 @@ def main():
     # rather than importing keeps the browser engine out of the process for everyone
     # who never opens a 3D avatar.
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    # Before the QApplication, because Chromium reads these once and never again.
+    use_software_rendering()
     app = QApplication(sys.argv)
     app.setApplicationName("Bonsai")
     window = Bonsai()

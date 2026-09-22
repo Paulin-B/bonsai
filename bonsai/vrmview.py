@@ -24,6 +24,33 @@ from .store import settings
 
 WEB_DIR = Path.home() / ".local/share/bonsai_web"
 
+
+# Chromium is told not to touch the GPU, and this is not a preference.
+#
+# A hardware-accelerated web view inside a PyQt window, on Wayland, on NVIDIA,
+# corrupts the display: the whole desktop came back as blocks of red and green noise,
+# and before that the same combination made Hyprland abort inside its own GL renderer.
+# Two compositors fighting over one driver is not something this feature can win.
+#
+# The cost is nothing here. The avatar is a 200x250 window with one character in it,
+# and software rendering draws it in milliseconds - it was verified that way, because
+# it was the only way that did not take the session down.
+SAFE_FLAGS = ("--disable-gpu --disable-gpu-compositing --disable-software-rasterizer "
+              "--use-gl=angle --use-angle=swiftshader --in-process-gpu")
+
+
+def use_software_rendering():
+    """Set before any web view exists, or Chromium has already chosen.
+
+    Left alone if the user has set the variable themselves - someone who has gone out
+    of their way to configure this is not to be argued with."""
+    import os
+    if "QTWEBENGINE_CHROMIUM_FLAGS" in os.environ:
+        return os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]
+    if not settings().get("vrm_use_gpu", False):
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = SAFE_FLAGS
+    return os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+
 # What the page needs, and where each comes from. Fetched on demand so that nobody
 # downloads two megabytes of renderer to use a text box.
 WEB_FILES = {
@@ -260,6 +287,7 @@ class VrmView:
             return None
 
         from PyQt6.QtWebEngineCore import QWebEngineSettings
+        use_software_rendering()
         view = QWebEngineView(parent)
         view.page().setBackgroundColor(QColor(0, 0, 0, 0))
         # The page is a file:// URL and the model is a file:// URL somewhere else,

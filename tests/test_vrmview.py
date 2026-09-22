@@ -8,7 +8,7 @@ and every decision about whether to use a VRM at all.
 """
 import sys
 from pathlib import Path
-from bonsai_under_test import load
+from bonsai_under_test import APP, load
 ga = load()
 ok = fail = 0
 def check(label, got, want):
@@ -74,6 +74,37 @@ check("with no model there is no web view", window.model, None)
 check("  ...so the drawn face is shown", window.avatar.isHidden(), False)
 check("telling it what to do is harmless either way",
       window.show_face("talk", 0.8), False)
+
+print("\n-- the GPU is not touched, and that is not a preference --")
+# A hardware-accelerated web view inside a PyQt window, on Wayland, on NVIDIA,
+# corrupted the whole display - and before that made Hyprland abort inside its own
+# GL renderer. Two compositors fighting over one driver is not winnable here.
+import os
+os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+ga.save_settings(dict(ga.DEFAULTS))
+flags = ga.use_software_rendering()
+check("the GPU is off by default", "--disable-gpu" in flags, True)
+check("  ...including its compositing", "--disable-gpu-compositing" in flags, True)
+check("  ...with a software renderer named, not left to chance",
+      "swiftshader" in flags, True)
+check("and that is what Chromium will read",
+      os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS"), flags)
+
+os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+ga.save_settings({**ga.DEFAULTS, "vrm_use_gpu": True})
+check("it can be turned back on for a machine where it works",
+      ga.use_software_rendering(), "")
+
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--something-of-my-own"
+ga.save_settings(dict(ga.DEFAULTS))
+check("someone who set the variable themselves is not overruled",
+      ga.use_software_rendering(), "--something-of-my-own")
+os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+ga.save_settings(dict(ga.DEFAULTS))
+
+check("the app sets it before the QApplication exists, since Chromium reads it once",
+      APP.read_text().index("use_software_rendering()")
+      < APP.read_text().index("app = QApplication(sys.argv)"), True)
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
