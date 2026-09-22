@@ -17,6 +17,7 @@ from . import listen  # noqa: F401
 from . import hotkey  # noqa: F401
 from . import avatar  # noqa: F401
 from . import vrm  # noqa: F401
+from . import vrmview  # noqa: F401
 from . import neuro  # noqa: F401
 from . import turns  # noqa: F401
 from . import chats  # noqa: F401
@@ -39,6 +40,7 @@ from .listen import *  # noqa: F401,F403
 from .hotkey import *  # noqa: F401,F403
 from .avatar import *  # noqa: F401,F403
 from .vrm import *  # noqa: F401,F403
+from .vrmview import *  # noqa: F401,F403
 from .neuro import *  # noqa: F401,F403
 from .turns import *  # noqa: F401,F403
 from .chats import *  # noqa: F401,F403

@@ -726,6 +726,10 @@ class SettingsDialog(QDialog):
         self.check("Voice", "listen_sends", "Send what it hears straight away",
                    "Off, it types into the box so you can look before it goes.")
 
+        self.line("Voice", "vrm_model", "VRM model (.vrm):",
+                  "A 3D avatar, used instead of the drawn face. Its expressions follow "
+                  "the mood and the mouth follows what is being said. The renderer is "
+                  "downloaded once, the first time one is set.")
         self.line("Voice", "speech_model", "Voice model (piper .onnx):",
                   "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
                   ".onnx.json beside it.")

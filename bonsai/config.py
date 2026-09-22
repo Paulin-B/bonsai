@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-vrmplan"
+APP_VERSION = "2026-09-22-vrm"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -203,6 +203,7 @@ DEFAULTS = {
     "play_scope": "own",
     "speak_replies": False,        # say answers out loud (off: nobody wants surprise audio)
     "speak_unprompted": True,      # ...and the things it says without being asked
+    "vrm_model": "",               # a .vrm file; set, it is used instead of the drawing
     "avatar_folder": "",           # blank uses ~/.local/share/bonsai_avatar
     "avatar_x": -1,                # where you last dragged it; -1 means wherever
     "avatar_y": -1,

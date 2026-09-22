@@ -280,7 +280,13 @@ class AvatarWindow(QWidget):
         self.avatar = Avatar(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.avatar)
+        # A VRM when one is set up, the drawing otherwise. Built here rather than
+        # imported at the top, so a machine with no web engine never loads one.
+        from .vrmview import VrmView
+        self.model = VrmView.build(self)
+        layout.addWidget(self.model if self.model is not None else self.avatar)
+        if self.model is not None:
+            self.avatar.hide()
         config = settings()
         # The size that is wanted, kept separately from the size it currently has:
         # by the time the compositor can be told anything, it has already tiled the
@@ -318,6 +324,15 @@ class AvatarWindow(QWidget):
     def closeEvent(self, event):
         self.remember()
         super().closeEvent(event)
+
+    def show_face(self, state, level, blink=0.0, tick=0):
+        """Whatever is drawing the face, tell it what the face is doing."""
+        if self.model is None:
+            return False
+        from .vrm import expression_weights
+        from .vrmview import VrmView
+        VrmView.apply(self.model, expression_weights(state, level, blink, tick))
+        return True
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

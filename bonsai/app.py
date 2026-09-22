@@ -512,6 +512,7 @@ class Bonsai(QWidget):
         self.listener = None
         self.face = None
         self._face_wired = False
+        self._face_tick = 0
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -2362,15 +2363,20 @@ class Bonsai(QWidget):
     def _face_level(self, level):
         if self.face is not None:
             self.face.avatar.set_level(level)
+            self._face_tick += 1
+            self.face.show_face(self.face.avatar.state, level,
+                                self.face.avatar.blink, self._face_tick)
 
     def _face_talking(self, talking):
         if self.face is not None:
             self.face.avatar.set_state("talk" if talking else "idle")
+            self.face.show_face(self.face.avatar.state, 0.0)
 
     def face_state(self, state):
         """Called by the turn loop: thinking while it works, idle when it stops."""
         if self.face is not None and self.face.avatar.state != "talk":
             self.face.avatar.set_state(state)
+            self.face.show_face(state, 0.0)
 
     def on_listen_toggled(self):
         if not self.listen_box.isChecked():
@@ -2713,6 +2719,12 @@ class Bonsai(QWidget):
 
 def main():
     """Entry point for `bonsai`, `python -m bonsai`, and running this file."""
+    # Before the QApplication exists, or a web view can never be made later: Qt
+    # refuses with "QtWebEngineWidgets must be imported or AA_ShareOpenGLContexts
+    # must be set before a QCoreApplication instance is created". Setting the flag
+    # rather than importing keeps the browser engine out of the process for everyone
+    # who never opens a 3D avatar.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName("Bonsai")
     window = Bonsai()
