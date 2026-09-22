@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-icons"
+APP_VERSION = "2026-09-22-listen"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -203,6 +203,11 @@ DEFAULTS = {
     "play_scope": "own",
     "speak_replies": False,        # say answers out loud (off: nobody wants surprise audio)
     "speak_unprompted": True,      # ...and the things it says without being asked
+    "listen_mode": "always",       # "always" or "push" - the mic icon switches it on
+    "listen_source": "",           # blank is your default mic; a .monitor hears the room
+    "listen_model": "small.en",    # tiny.en is 3x faster and hears "factorial" for Factorio
+    "listen_threshold": 240,       # mean sample level that counts as speech
+    "listen_sends": False,         # send what it heard, or just type it into the box
     "kokoro_voice": "af_heart",    # one of 54; af_* are American female, am_* male
     "kokoro_python": "",           # blank uses ~/.local/share/bonsai-voice/bin/python
     "kokoro_model": "",            # blank uses ~/.local/share/bonsai_voices/kokoro.onnx

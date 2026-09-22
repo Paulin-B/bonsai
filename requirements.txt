@@ -13,6 +13,7 @@ websockets>=12.0         # the Neuro API game link, so games can drive Bonsai di
 # Speech is optional and lives in its own virtual environment, because the system
 # Python is often externally managed and a 300MB network does not belong in it:
 #   python3 -m venv ~/.local/share/bonsai-voice
-#   ~/.local/share/bonsai-voice/bin/pip install kokoro-onnx
+#   ~/.local/share/bonsai-voice/bin/pip install kokoro-onnx faster-whisper
 # then put kokoro.onnx and voices.bin in ~/.local/share/bonsai_voices/.
-# piper or espeak-ng on PATH also work, and need none of that.
+# piper or espeak-ng on PATH also work for speaking, and need none of that.
+# faster-whisper is what lets it hear you; its model downloads on first use.

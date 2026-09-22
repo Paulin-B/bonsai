@@ -706,6 +706,26 @@ class SettingsDialog(QDialog):
                     "54 of them. English first; the rest speak their own language, so "
                     "pick one that matches what you want read out.",
                     values=voices)
+        self.hint("Voice", "Bonsai can also listen. The microphone icon switches it "
+                           "on and off in one click, so a call on Discord is not "
+                           "overheard; on push-to-talk it only listens while the icon "
+                           "is held down. Point it at a .monitor source instead and it "
+                           "hears what you are playing rather than what you say.")
+        self.choice("Voice", "listen_mode", "Microphone:",
+                    ["Always on while switched on", "Only while the icon is held"],
+                    values={"Always on while switched on": "always",
+                            "Only while the icon is held": "push"})
+        self.line("Voice", "listen_source", "Listen to:",
+                  "Blank is your default microphone. For system audio, use an output "
+                  "monitor - run 'pactl list short sources' and pick the .monitor one.")
+        self.choice("Voice", "listen_model", "Transcription model:",
+                    ["small.en", "tiny.en", "base.en", "medium.en"],
+                    "small.en is about four times faster than real time here and hears "
+                    "'Factorio'; tiny.en is three times faster again and hears "
+                    "'factorial'.")
+        self.check("Voice", "listen_sends", "Send what it hears straight away",
+                   "Off, it types into the box so you can look before it goes.")
+
         self.line("Voice", "speech_model", "Voice model (piper .onnx):",
                   "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
                   ".onnx.json beside it.")

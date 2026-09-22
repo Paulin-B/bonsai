@@ -47,6 +47,9 @@ from .neuro import (
 from .speech import (
     Speaker, available_engine, speakable, why_silent,
 )
+from .listen import (
+    Listener, why_deaf,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -500,6 +503,7 @@ class Bonsai(QWidget):
         self.player = None
         self.gamelink = None
         self.speaker = None
+        self.listener = None
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -746,6 +750,13 @@ class Bonsai(QWidget):
             "Listen for games that speak the Neuro API, so it plays through the game "
             "itself rather than by photographing the screen.",
             False, self.on_gamelink_toggled)
+        self.listen_box = toggle(
+            "\U0001F3A4", "Microphone",
+            "Hear what you say and put it in the box. One click off, so a call is not "
+            "overheard. On push-to-talk it only listens while you hold this down. "
+            "Which microphone - or which monitor, to hear what you are playing - is on "
+            "the Voice page in Settings.",
+            False, self.on_listen_toggled)
         self.speak_box = toggle(
             "\U0001F50A", "Speak",
             "Say answers out loud. Code, tables and paths are not read out - the prose "
@@ -754,7 +765,12 @@ class Bonsai(QWidget):
 
         self.toggle_buttons = [self.vision_box, self.search_box, self.monitor_box,
                                self.proactive_box, self.play_box, self.gamelink_box,
-                               self.speak_box]
+                               self.listen_box, self.speak_box]
+
+        # Push-to-talk: the switch has to open on press and close on release, not on
+        # the click finishing, or the first word of everything is missing.
+        self.listen_box.pressed.connect(lambda: self.hold_to_talk(True))
+        self.listen_box.released.connect(lambda: self.hold_to_talk(False))
 
         composer_wrap = QWidget()
         wrap_layout = QVBoxLayout(composer_wrap)
@@ -2293,6 +2309,55 @@ class Bonsai(QWidget):
             self.speaker.failed.connect(lambda why: self.log(why, "orange"))
         self.speaker.say(text)
 
+    def on_listen_toggled(self):
+        if not self.listen_box.isChecked():
+            if self.listener is not None:
+                self.listener.stop()
+                self.listener.wait(2000)
+                self.listener = None
+            self.log("--- not listening ---")
+            return
+        problem = why_deaf()
+        if problem:
+            self.log(problem, "orange")
+            self.listen_box.blockSignals(True)
+            self.listen_box.setChecked(False)
+            self.listen_box.blockSignals(False)
+            return
+        push = self.settings.get("listen_mode", "always") == "push"
+        self.listener = Listener(dict(self.settings))
+        self.listener.heard.connect(self.on_heard)
+        self.listener.failed.connect(self.on_listen_failed)
+        self.listener.ready.connect(
+            lambda: self.log("\U0001F3A4 listening" + (" while held" if push else "")))
+        self.listener.set_open(not push)
+        self.listener.start()
+        self.log("--- starting to listen (the transcriber takes a moment) ---")
+
+    def hold_to_talk(self, down):
+        """Only meaningful on push-to-talk; harmless otherwise."""
+        if (self.listener is not None
+                and self.settings.get("listen_mode", "always") == "push"):
+            self.listener.set_open(down)
+
+    def on_heard(self, text):
+        self.log(f"\U0001F3A4 heard: {text}")
+        if self.settings.get("listen_sends", False):
+            self.input.setPlainText(text)
+            self.send()
+            return
+        # Appended, not replacing: half a typed message should survive being spoken to.
+        existing = self.input.text().strip()
+        self.input.setPlainText(f"{existing} {text}".strip())
+        self.input.moveCursor(QTextCursor.MoveOperation.End)
+
+    def on_listen_failed(self, why):
+        self.log(why, "orange")
+        self.listen_box.blockSignals(True)
+        self.listen_box.setChecked(False)
+        self.listen_box.blockSignals(False)
+        self.listener = None
+
     def on_gamelink_toggled(self):
         if not self.gamelink_box.isChecked():
             if self.gamelink:
@@ -2560,6 +2625,9 @@ class Bonsai(QWidget):
         if self.speaker is not None:
             self.speaker.stop()
             self.speaker.wait(1500)
+        if self.listener is not None:
+            self.listener.stop()
+            self.listener.wait(2000)
         closed = stop_stage()
         if closed:
             self.log(f"Closed the stage on {closed}.")
