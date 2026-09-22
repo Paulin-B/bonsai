@@ -15,7 +15,7 @@ from PyQt6.QtGui import (
     QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget, QTextBrowser, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
@@ -700,64 +700,61 @@ class Bonsai(QWidget):
         layout.addWidget(self.pages, stretch=1)
         layout = chat_layout        # the strip and composer belong to the chat page
 
-        strip = QFrame()
-        strip.setObjectName("toggleStrip")
-        toggles = QHBoxLayout(strip)
-        toggles.setContentsMargins(26, 8, 20, 8)
-        toggles.setSpacing(14)
+        # Seven named checkboxes in a row across the window was a lot of furniture for
+        # settings that are glanced at rather than read. As icons they take a tenth of
+        # the space, and they move down beside the tree - which is tall, so the strip
+        # under the composer had an empty band across it that this now fills.
+        def toggle(icon, name, tip, checked=False, on_change=None):
+            button = QToolButton()
+            button.setObjectName("iconToggle")
+            button.setText(icon)
+            button.setCheckable(True)
+            button.setChecked(checked)
+            button.setToolTip(f"{name}\n\n{tip}")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            if on_change is not None:
+                button.toggled.connect(lambda _=False: on_change())
+            return button
 
-        self.vision_box = QCheckBox("Screen capture")
-        self.vision_box.setChecked(self.settings.get("vision_default", True))
-        self.vision_box.stateChanged.connect(
+        self.vision_box = toggle(
+            "\U0001F4F7", "Screen capture",
+            "Attach a picture of your screen to what you send.",
+            self.settings.get("vision_default", True),
             lambda: self.update_setting("vision_default", self.vision_box.isChecked()))
-        toggles.addWidget(self.vision_box)
-
-        self.search_box = QCheckBox("Web search")
-        self.search_box.setChecked(self.settings.get("web_search_enabled", True))
-        self.search_box.setToolTip("Turn off to avoid tripping search engine rate limits.")
-        self.search_box.stateChanged.connect(
-            lambda: self.update_setting("web_search_enabled", self.search_box.isChecked()))
-        toggles.addWidget(self.search_box)
-
-        self.monitor_box = QCheckBox("Live monitor")
-        self.monitor_box.stateChanged.connect(self.on_monitor_toggled)
-        toggles.addWidget(self.monitor_box)
-
-        self.proactive_box = QCheckBox("Proactive")
-        self.proactive_box.setToolTip(
-            "Bonsai periodically looks at your screen and speaks up only if something "
-            "looks wrong. Off by default; interval and quiet period are in Settings.")
-        self.proactive_box.stateChanged.connect(self.on_proactive_toggled)
-        toggles.addWidget(self.proactive_box)
-
-        self.play_box = QCheckBox("Play")
-        self.play_box.setToolTip(
-            "Bonsai plays whatever is running on the stage - looking, pressing "
-            "something, seeing what happened, and talking about it. Ask it to start a "
-            "game on the stage first. It stops on its own after the step limit in "
-            "Settings.")
-        self.play_box.stateChanged.connect(self.on_play_toggled)
-        toggles.addWidget(self.play_box)
-
-        self.gamelink_box = QCheckBox("Game link")
-        self.gamelink_box.setToolTip(
-            "Listen for games that speak the Neuro API. A game that connects tells "
-            "Bonsai what is happening and what it can do, so it plays through the "
-            "game itself instead of photographing the screen and guessing at keys.")
-        self.gamelink_box.stateChanged.connect(self.on_gamelink_toggled)
-        toggles.addWidget(self.gamelink_box)
-
-        self.speak_box = QCheckBox("Speak")
-        self.speak_box.setToolTip(
+        self.search_box = toggle(
+            "\U0001F310", "Web search",
+            "Let it search the web. Turn off to avoid tripping rate limits.",
+            self.settings.get("web_search_enabled", True),
+            lambda: self.update_setting("web_search_enabled",
+                                        self.search_box.isChecked()))
+        self.monitor_box = toggle(
+            "\U0001F4E1", "Live monitor",
+            "Run your monitor script and watch what it prints.",
+            False, self.on_monitor_toggled)
+        self.proactive_box = toggle(
+            "\U0001F440", "Proactive",
+            "Look at your screen every so often and speak up when something is worth "
+            "saying. Interval, quiet period and how good a remark has to be are in "
+            "Settings.", False, self.on_proactive_toggled)
+        self.play_box = toggle(
+            "\U0001F3AE", "Play",
+            "Play whatever is running on the stage - looking, pressing something, "
+            "seeing what happened, and talking about it. Ask it to start a game on the "
+            "stage first.", False, self.on_play_toggled)
+        self.gamelink_box = toggle(
+            "\U0001F50C", "Game link",
+            "Listen for games that speak the Neuro API, so it plays through the game "
+            "itself rather than by photographing the screen.",
+            False, self.on_gamelink_toggled)
+        self.speak_box = toggle(
+            "\U0001F50A", "Speak",
             "Say answers out loud. Code, tables and paths are not read out - the prose "
-            "is. Which engine is used, and how much is spoken, are on the Voice page "
-            "in Settings.")
-        self.speak_box.setChecked(bool(self.settings.get("speak_replies", False)))
-        self.speak_box.stateChanged.connect(self.on_speak_toggled)
-        toggles.addWidget(self.speak_box)
+            "is. The voice and how much is spoken are on the Voice page in Settings.",
+            bool(self.settings.get("speak_replies", False)), self.on_speak_toggled)
 
-        toggles.addStretch(1)
-        layout.addWidget(strip)
+        self.toggle_buttons = [self.vision_box, self.search_box, self.monitor_box,
+                               self.proactive_box, self.play_box, self.gamelink_box,
+                               self.speak_box]
 
         composer_wrap = QWidget()
         wrap_layout = QVBoxLayout(composer_wrap)
@@ -823,6 +820,14 @@ class Bonsai(QWidget):
         footer.setSpacing(10)
         self.bonsai = BonsaiGrowth()
         footer.addWidget(self.bonsai, alignment=Qt.AlignmentFlag.AlignBottom)
+
+        switches = QHBoxLayout()
+        switches.setSpacing(2)
+        switches.setContentsMargins(0, 0, 0, 0)
+        for button in self.toggle_buttons:
+            switches.addWidget(button)
+        footer.addLayout(switches)
+
         self.status = QLabel("Ready")
         self.status.setObjectName("statusText")
         footer.addWidget(self.status, stretch=1,

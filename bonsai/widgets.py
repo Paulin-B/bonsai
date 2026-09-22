@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import (
 from .config import (
     DEFAULTS, DOCKER_SERVICES, _spell,
 )
+from .speech import (
+    voice_choices,
+)
 from .store import (
     BRIEFING_ALL_KINDS, BRIEFING_RANGE_LABELS, BRIEFING_SEEN_DAYS, all_skills, endpoints_as_text, endpoints_from_text, forget_briefing_seen, match_skills, settings, skill_query,
 )
@@ -692,11 +695,17 @@ class SettingsDialog(QDialog):
                            "sounds like it. With neither installed, this stays quiet "
                            "and says so in the log.")
         self.check("Voice", "speak_replies", "Say answers out loud")
-        self.check("Voice", "speak_unprompted",
-                   "Also say the things it volunteers (proactive remarks, game chat)")
-        self.line("Voice", "kokoro_voice", "Kokoro voice:",
-                  "One of 54. af_heart, af_bella and af_nicole are warm; am_michael "
-                  "and am_adam are male; bf_* and bm_* are British.")
+        # Short, because a checkbox label cannot wrap: this one was wider than the
+        # dialog and the end of it was simply cut off. The detail goes in the tooltip.
+        self.check("Voice", "speak_unprompted", "Also say unprompted remarks",
+                   "Proactive remarks about your screen, commentary while it plays a "
+                   "game, and replies to someone talking to it in one. These are the "
+                   "ones most likely to be unwelcome, so they have their own switch.")
+        voices = voice_choices()
+        self.choice("Voice", "kokoro_voice", "Kokoro voice:", list(voices),
+                    "54 of them. English first; the rest speak their own language, so "
+                    "pick one that matches what you want read out.",
+                    values=voices)
         self.line("Voice", "speech_model", "Voice model (piper .onnx):",
                   "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
                   ".onnx.json beside it.")
@@ -747,7 +756,11 @@ class SettingsDialog(QDialog):
         self.service_boxes = {}
         running = self.current.get("services", DEFAULTS["services"])
         for index, (name, (what, required)) in enumerate(DOCKER_SERVICES.items()):
-            box = QCheckBox(f"{name} — {what}")
+            # The name alone: a checkbox label cannot wrap, so "bonsai-observer — a
+            # second model server for proactive screen checks" set a minimum width
+            # wider than the dialog and every field on the page ran off the edge.
+            box = QCheckBox(name)
+            box.setToolTip(what)
             box.setChecked(True if required else bool(running.get(name, False)))
             box.setEnabled(not required)
             if required:

@@ -365,8 +365,17 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
 #bonsaiGrowth {{ color: {c['muted']}; background: transparent;
                  font-family: "DejaVu Sans Mono", monospace; font-size: 9px; }}
 
-#toggleStrip {{ background: {c['surface']}; border-top: 1px solid {c['border']}; }}
-#toggleStrip QWidget {{ background: transparent; }}
+/* The toggles are icons now, sitting in the footer beside the tree. Unchecked they
+   are quiet enough to ignore; checked they are the accent colour, because whether
+   the microphone or the screen is on is the one thing you want to see at a glance. */
+QToolButton#iconToggle {{
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    padding: 3px 5px; font-size: 15px; color: {c['muted']};
+}}
+QToolButton#iconToggle:hover {{ background: {c['hover']}; }}
+QToolButton#iconToggle:checked {{
+    background: {c['raised']}; border: 1px solid {c['accent']}; color: {c['text']};
+}}
 
 #composer {{ background: {c['field']}; border: 1px solid {c['border']};
              border-radius: 14px; }}

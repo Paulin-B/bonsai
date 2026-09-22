@@ -109,6 +109,16 @@ for index, page in enumerate(dialog.PAGES):
                and a.geometry().intersects(b.geometry())}
     check(f"nothing overlaps on {page}", clashes, set())
 
+# A checkbox label cannot wrap, so one long enough simply runs off the side of the
+# dialog and the end of the sentence is invisible. That is what happened on Voice.
+for index, page in enumerate(dialog.PAGES):
+    dialog.tabs.setCurrentIndex(index)
+    settle(6)
+    viewport = dialog.tabs.widget(index).viewport().width()
+    spilling = [w for _, w in rows_of(page)
+                if w.geometry().isValid() and w.geometry().right() > viewport]
+    check(f"nothing runs off the side of {page}", spilling, [])
+
 check("every page scrolls rather than squeezing",
       all(isinstance(dialog.tabs.widget(i), ga.QScrollArea)
           for i in range(dialog.tabs.count())), True)

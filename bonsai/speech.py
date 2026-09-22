@@ -34,6 +34,46 @@ KOKORO_HOME = Path.home() / ".local/share/bonsai-voice"
 KOKORO_MODELS = Path.home() / ".local/share/bonsai_voices"
 
 
+# The 54 voices of Kokoro v1.0, as a list rather than a question asked of the model:
+# opening Settings should not load 310MB to fill a dropdown. First letter is the
+# language, second is the gender, which is worth spelling out because "zf_xiaoni" is
+# not self-explanatory.
+KOKORO_LANGUAGES = {
+    "a": "American", "b": "British", "e": "Spanish", "f": "French", "h": "Hindi",
+    "i": "Italian", "j": "Japanese", "p": "Portuguese", "z": "Chinese",
+}
+
+KOKORO_VOICES = [
+    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
+    "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo",
+    "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily", "bm_daniel", "bm_fable",
+    "bm_george", "bm_lewis", "ef_dora", "em_alex", "em_santa", "ff_siwis", "hf_alpha",
+    "hf_beta", "hm_omega", "hm_psi", "if_sara", "im_nicola", "jf_alpha",
+    "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo", "pf_dora", "pm_alex",
+    "pm_santa", "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi", "zm_yunjian",
+    "zm_yunxi", "zm_yunxia", "zm_yunyang",
+]
+
+
+def voice_label(name):
+    """'af_heart' -> 'Heart (American, female)'."""
+    language = KOKORO_LANGUAGES.get(name[:1], "")
+    gender = {"f": "female", "m": "male"}.get(name[1:2], "")
+    person = name.split("_", 1)[-1].replace("_", " ").title()
+    if not (language and gender):
+        return name
+    return f"{person} ({language}, {gender})"
+
+
+def voice_choices():
+    """{shown: stored} for the settings dropdown, English first since it is the
+    default and the rest are a long way down an alphabetical list."""
+    english = [v for v in KOKORO_VOICES if v[0] in "ab"]
+    others = [v for v in KOKORO_VOICES if v[0] not in "ab"]
+    return {voice_label(name): name for name in english + others}
+
+
 def kokoro_python():
     configured = (settings().get("kokoro_python") or "").strip()
     candidate = Path(configured).expanduser() if configured else KOKORO_HOME / "bin/python"
