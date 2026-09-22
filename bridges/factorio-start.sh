@@ -112,6 +112,7 @@ echo "Join this world from your own Factorio: Multiplayer, Connect to address, l
 # Not exec: that would replace this shell and take the EXIT trap with it, leaving the
 # headless server running after the bridge stops. It then holds the lock on its own
 # data directory, and the next run fails with "is another instance already running?"
+# GOAL="have iron-plate 50" ./bridges/factorio-start.sh  - see --goal for the kinds.
 python3 "$(dirname "$0")/factorio.py" \
     --rcon-password "$PASSWORD" --rcon-port "$RCON_PORT" \
-    --neuro-port "$NEURO_PORT" --server-log "$LOG"
+    --neuro-port "$NEURO_PORT" --server-log "$LOG" --goal "${GOAL:-}"

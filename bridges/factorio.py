@@ -122,6 +122,53 @@ rcon.print('You are at '..math.floor(p.x)..','..math.floor(p.y)..
         # and the interesting part is whether it got there.
         "walk": True,
     },
+    "recipe": {
+        "description": "Ask what an item is made of, and what those are made of. Use "
+                       "this instead of guessing at Factorio's recipes.",
+        "schema": {"type": "object", "required": ["item"],
+                   "properties": {"item": {"type": "string"}}},
+        # The game holds every recipe. Reading them out of it is knowledge that cannot
+        # be out of date or invented, which a primer written into the prompt would be.
+        "lua": BOT + """
+local c = bot()
+local rec = prototypes.recipe['ARG_item']
+if not rec then
+  rcon.print('There is no recipe for ARG_item. Names look like "iron-plate", '..
+    '"iron-gear-wheel", "burner-mining-drill", "transport-belt".')
+  return
+end
+local function describe(recipe, depth)
+  local parts = {}
+  for _, ing in pairs(recipe.ingredients) do
+    local have = c and c.get_item_count(ing.name) or 0
+    local line = ing.amount..' '..ing.name..' (you have '..have..')'
+    local inner = prototypes.recipe[ing.name]
+    if depth > 0 and inner and have < ing.amount then
+      line = line..' <- '..describe(inner, depth - 1)
+    end
+    parts[#parts+1] = line
+  end
+  return table.concat(parts, ' + ')
+end
+local where = (rec.category == 'crafting') and 'by hand' or
+  ('only in a machine (category: '..rec.category..')')
+rcon.print('ARG_item is made '..where..' from: '..describe(rec, 2)..
+  '. It takes '..string.format('%.1f', rec.energy)..'s.')
+""",
+    },
+    "fight": {
+        "description": "Shoot at the nearest enemy. Keeps firing while anything is "
+                       "close, then stops on its own.",
+        "lua": """
+local hit = remote.call('bonsai', 'fight')
+if not hit then
+  rcon.print('Nothing hostile within range, so there is nothing to shoot at.')
+else
+  rcon.print('Firing at a '..hit.name..' about '..hit.distance..' tiles away. You keep '..
+    'shooting while they are close. If your health is dropping, walk away instead.')
+end
+""",
+    },
     "insert": {
         "description": "Put something you are carrying into a nearby machine - coal "
                        "into a furnace to fuel it, ore into a furnace to smelt.",
@@ -334,6 +381,76 @@ async def watch_chat(path, on_line):
 WALK_TIMEOUT = 45
 
 
+# A goal is only worth having if the game can settle it. Each of these is a question
+# about the world with a number for an answer, so progress is measured rather than
+# claimed - the same reason the walk reports where it ended up instead of that it was
+# asked to walk. A model told "you have 18 of 50" behaves nothing like one told to
+# gather iron and left to feel about it.
+GOALS = {
+    "have": {
+        "usage": "have <item> <count>            - carry that many of something",
+        "lua": """
+local c = bot()
+if not c then rcon.print('0|no body') return end
+local have = c.get_item_count('ARG_what')
+rcon.print(have..'|carrying '..have..' of ARG_count ARG_what')
+""",
+    },
+    "build": {
+        "usage": "build <entity> <count>         - have that many placed on the map",
+        "lua": """
+local c = bot()
+local s = c and c.surface or game.surfaces.nauvis
+local built = #s.find_entities_filtered{name='ARG_what', force='player'}
+rcon.print(built..'|ARG_what placed: '..built..' of ARG_count')
+""",
+    },
+    "fuel": {
+        "usage": "fuel <entity> <count>          - keep that many of them burning",
+        "lua": """
+local s = game.surfaces.nauvis
+local lit, total = 0, 0
+for _, e in pairs(s.find_entities_filtered{name='ARG_what', force='player'}) do
+  total = total + 1
+  local inv = e.get_inventory(defines.inventory.fuel)
+  if inv and not inv.is_empty() then lit = lit + 1 end
+end
+rcon.print(lit..'|'..lit..' of '..total..' ARG_what have fuel in them (want ARG_count)')
+""",
+    },
+}
+
+
+def parse_goal(text):
+    """'have iron-plate 50' -> (kind, what, count). Returns None with a reason."""
+    parts = (text or "").split()
+    if len(parts) != 3:
+        return None, ("A goal is three words: <kind> <thing> <count>. For example "
+                      "'have iron-plate 50'. Kinds:\n  "
+                      + "\n  ".join(spec["usage"] for spec in GOALS.values()))
+    kind, what, count = parts
+    if kind not in GOALS:
+        return None, f"'{kind}' is not a kind of goal. Use: {', '.join(GOALS)}."
+    if not count.isdigit() or int(count) < 1:
+        return None, f"'{count}' is not a count."
+    if not all(ch.isalnum() or ch in "-_" for ch in what):
+        return None, f"'{what}' is not a Factorio name."
+    return (kind, what, int(count)), None
+
+
+def goal_progress(rcon, goal):
+    """(done, sentence) - asked of the game every turn, never of the model."""
+    kind, what, count = goal
+    code = (GOALS[kind]["lua"].replace("ARG_what", what)
+            .replace("ARG_count", str(count)))
+    answer = rcon.lua(BOT + code)
+    number, _, description = answer.partition("|")
+    try:
+        return int(number) >= count, description or answer
+    except ValueError:
+        return False, answer or "could not measure that"
+
+
 async def walk(rcon, x, y):
     """Ask the mod to walk there, then watch until it arrives or gives up.
 
@@ -380,7 +497,7 @@ async def walk(rcon, x, y):
     return f"Still walking after {WALK_TIMEOUT} seconds - it is a long way."
 
 
-async def play(rcon, url, quiet, server_log=None):
+async def play(rcon, url, quiet, server_log=None, goal=None):
     async with websockets.connect(url) as ws:
         async def send(command, data=None):
             await ws.send(json.dumps({"command": command, "game": "Factorio",
@@ -471,6 +588,47 @@ async def play(rcon, url, quiet, server_log=None):
                 # side channel. As a context message it competed with a forced action
                 # every couple of seconds and lost: asked for a furnace, Bonsai went
                 # back to talking about iron.
+                # Everything that decides what to do next is gathered here, from the
+                # game, every turn: whether it died, what is trying to kill it, and
+                # how far along the goal is. "Running around aimlessly" was not a
+                # reasoning failure - nothing was telling it where it stood.
+                urgent = ""
+                report = rcon.lua("local s = remote.call('bonsai','state') "
+                                  "rcon.print(string.format('%d %d %s %s', s.health, "
+                                  "s.threats, tostring(s.fighting), s.nest))")
+                bits = report.split()
+                if len(bits) >= 3:
+                    health, threats, fighting = int(bits[0]), int(bits[1]), bits[2]
+                    nest = bits[3] if len(bits) > 3 else ""
+                    if rcon.lua("rcon.print(tostring(remote.call("
+                                "'bonsai','took_death')))") == "true":
+                        urgent += ("\n\nYOU DIED. Everything you were carrying died "
+                                   "with it and you have a fresh body with a pistol "
+                                   "and ten magazines. Whatever you were part-way "
+                                   "through, you are starting that part again.")
+                    if threats:
+                        urgent += (f"\n\n{threats} enemies are within 40 tiles of you"
+                                   + (f" and a nest sits at {nest}" if nest else "")
+                                   + f". Your health is {health} of 250"
+                                   + (", and you are shooting." if fighting == "true"
+                                      else ". You are not fighting.")
+                                   + " Fight them or walk away, but do not stand there "
+                                     "mining while they close in.")
+                    elif health < 150:
+                        urgent += (f"\n\nYour health is {health} of 250 and nothing "
+                                   "is near you. It comes back on its own if you leave "
+                                   "the fighting alone for a while.")
+
+                if goal:
+                    reached, where = goal_progress(rcon, goal)
+                    urgent += (f"\n\nYOUR GOAL: {' '.join(str(g) for g in goal)}."
+                               f"\nWhere you are with it, measured just now: {where}."
+                               + (" That is done - say so, and keep it that way."
+                                  if reached else
+                                  " Everything you do this turn should move that "
+                                  "number. If you cannot see how an action does, do "
+                                  "a different action."))
+
                 heard = ""
                 if said_to_us:
                     heard = ("\n\nSomeone is playing in this world with you and just "
@@ -480,10 +638,15 @@ async def play(rcon, url, quiet, server_log=None):
                              "and say something back.")
                     said_to_us.clear()
                 await send("actions/force", {
-                    "state": state + heard,
-                    "query": "It is your turn. Do one thing that gets you closer to an "
-                             "automated factory - you will need iron, and a burner "
-                             "mining drill on an ore patch is the usual first step.",
+                    "state": state + urgent + heard,
+                    "query": ("It is your turn. Do one thing that moves the goal "
+                              "above along." if goal else
+                              "It is your turn. Do one thing that gets you closer to "
+                              "an automated factory - you will need iron, and a "
+                              "burner mining drill on an ore patch is the usual first "
+                              "step.")
+                             + " If you do not know what something is made of, ask "
+                               "with the recipe action rather than guessing.",
                     "action_names": list(ACTIONS)})
                 await done.wait()
 
@@ -504,6 +667,11 @@ def main():
                         help="the file the Factorio server's own output goes to. Given "
                              "this, chat from anyone playing in the same world reaches "
                              "Bonsai, and what Bonsai says goes back into game chat.")
+    parser.add_argument("--goal", default="",
+                        help="what it is trying to do, as '<kind> <thing> <count>' - "
+                             "for example \"have iron-plate 50\", \"build "
+                             "burner-mining-drill 4\" or \"fuel stone-furnace 2\". "
+                             "Progress is measured in the game every turn.")
     parser.add_argument("--quiet", action="store_true",
                         help="add context silently, without inviting a reply")
     args = parser.parse_args()
@@ -514,9 +682,15 @@ def main():
                  f"{args.rcon_port} ({exc}). Is the server running, and was it "
                  "started with --rcon-port and --rcon-password?")
     print(f"RCON connected to {args.rcon_host}:{args.rcon_port}")
+    goal = None
+    if args.goal:
+        goal, complaint = parse_goal(args.goal)
+        if complaint:
+            sys.exit(complaint)
+        print(f"goal: {' '.join(str(part) for part in goal)}")
     url = f"ws://127.0.0.1:{args.neuro_port}"
     try:
-        asyncio.run(play(rcon, url, args.quiet, args.server_log))
+        asyncio.run(play(rcon, url, args.quiet, args.server_log, goal))
     except KeyboardInterrupt:
         print("\nstopped")
     except OSError as exc:

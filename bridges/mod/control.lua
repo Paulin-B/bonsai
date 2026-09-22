@@ -54,6 +54,20 @@ local function label(character)
   }
 end
 
+-- A pistol and some magazines, because a body that cannot shoot has only one answer
+-- to a biter and it is not an interesting one. Idempotent, and called from spawn
+-- rather than only at creation: arming inside ensure_body meant a body that already
+-- existed - which after the first turn is always - was never armed at all.
+local function arm(character)
+  local guns = character.get_inventory(defines.inventory.character_guns)
+  local ammo = character.get_inventory(defines.inventory.character_ammo)
+  if guns and guns.is_empty() then guns.insert{name = "pistol", count = 1} end
+  if ammo and ammo.is_empty() then
+    ammo.insert{name = "firearm-magazine", count = 10}
+  end
+end
+
+
 local function ensure_body()
   if storage.bot and storage.bot.valid then return storage.bot end
   local surface = game.surfaces.nauvis
@@ -103,6 +117,19 @@ script.on_event(defines.events.on_tick, function()
   if not (character and character.valid) then return end
   if game.tick % 60 == 0 then update_marker(character) end
 
+  if storage.fighting then
+    local enemy = character.surface.find_nearest_enemy{
+      position = character.position, max_distance = 32, force = character.force}
+    if enemy and enemy.valid then
+      character.shooting_state = {state = defines.shooting.shooting_enemies,
+                                  position = enemy.position}
+    else
+      character.shooting_state = {state = defines.shooting.not_shooting,
+                                  position = character.position}
+      storage.fighting = false
+    end
+  end
+
   local path = storage.path
   if not path then return end
 
@@ -140,6 +167,18 @@ script.on_event(defines.events.on_tick, function()
                              direction = direction_towards(here, node.position)}
 end)
 
+script.on_event(defines.events.on_entity_died, function(event)
+  -- The body dies and everything it carried dies with it. That has to reach the
+  -- model as a fact, or the next turn is spent wondering where the iron went.
+  if storage.bot and event.entity == storage.bot then
+    storage.bot = nil
+    storage.deaths = (storage.deaths or 0) + 1
+    storage.died = true
+    storage.path, storage.node, storage.fighting = nil, nil, nil
+  end
+end, {{filter = "name", name = "character"}})
+
+
 script.on_event(defines.events.on_script_path_request_finished, function(event)
   if event.id ~= storage.request then return end
   storage.request = nil
@@ -165,6 +204,7 @@ remote.add_interface("bonsai", {
   spawn = function(name)
     storage.name = name or "Bonsai"
     local character = ensure_body()
+    arm(character)
     label(character)
     update_marker(character)
     return {x = character.position.x, y = character.position.y}
@@ -210,11 +250,45 @@ remote.add_interface("bonsai", {
       -- which cost an hour of chasing a bug that was not there.
       named = storage.tag ~= nil and storage.tag.valid,
       on_map = storage.marker ~= nil and storage.marker.valid,
+      health = math.floor(character.health or 0),
+      fighting = storage.fighting or false,
+      -- Counted every time rather than only when something bites, so "there are
+      -- three of them ten tiles away" can be acted on before it is a problem.
+      threats = #character.surface.find_entities_filtered{
+        force = "enemy", type = "unit", position = position, radius = 40},
+      nest = (function()
+        local e = character.surface.find_entities_filtered{
+          force = "enemy", type = "unit-spawner", position = position,
+          radius = 120, limit = 1}[1]
+        return e and (math.floor(e.position.x) .. "," .. math.floor(e.position.y)) or ""
+      end)(),
+      deaths = storage.deaths or 0,
+      just_died = storage.died or false,
     }
   end,
 
   stop = function()
     stop_walking(storage.bot)
+    storage.fighting = false
     return true
+  end,
+
+  fight = function()
+    local character = ensure_body()
+    local enemy = character.surface.find_nearest_enemy{
+      position = character.position, max_distance = 32, force = character.force}
+    if not (enemy and enemy.valid) then return nil end
+    storage.fighting = true
+    stop_walking(character)
+    return {name = enemy.name,
+            distance = math.floor(distance(character.position, enemy.position))}
+  end,
+
+  -- Read once and cleared, so a death is reported to the turn that follows it and
+  -- not to every turn after that.
+  took_death = function()
+    local died = storage.died or false
+    storage.died = false
+    return died
   end,
 })
