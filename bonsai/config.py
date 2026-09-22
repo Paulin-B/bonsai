@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-floating"
+APP_VERSION = "2026-09-22-vrmplan"
 
 
 # Where the repo lives, for the optional files that ship beside it.
