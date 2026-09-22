@@ -57,11 +57,13 @@ end
 local function ensure_body()
   if storage.bot and storage.bot.valid then return storage.bot end
   local surface = game.surfaces.nauvis
-  -- Any character left over from a console command is removed, so "the character on
-  -- this surface" is unambiguous and every action drives the same body.
-  for _, stray in pairs(surface.find_entities_filtered{name = "character"}) do
-    stray.destroy()
-  end
+  -- Nothing is destroyed here any more. This used to clear "stray" characters so
+  -- that "the character on this surface" meant Bonsai's - and a player's character
+  -- is a character entity, so it deleted someone playing alongside, and everything
+  -- they were carrying, the moment this ran. Identifying the body by unit number
+  -- instead removed the reason to delete anything, and a guard that only spares
+  -- characters with a player attached would still be one API detail away from doing
+  -- it again. Strays are harmless; nothing looks them up.
   local where = surface.find_non_colliding_position("character", {0, 0}, 64, 1) or {0, 0}
   local character = surface.create_entity{name = "character", position = where,
                                           force = "player"}
@@ -151,6 +153,15 @@ script.on_event(defines.events.on_script_path_request_finished, function(event)
 end)
 
 remote.add_interface("bonsai", {
+  -- So the bridge can tell Bonsai's body from anyone else's. Every action used to
+  -- take "the first character on the surface", which once a person joined was a coin
+  -- flip between Bonsai and them - and mining from someone else's hands looks exactly
+  -- like your inventory emptying itself.
+  body_id = function()
+    local character = storage.bot
+    return (character and character.valid) and character.unit_number or nil
+  end,
+
   spawn = function(name)
     storage.name = name or "Bonsai"
     local character = ensure_body()

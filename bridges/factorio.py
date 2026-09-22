@@ -80,12 +80,15 @@ class Rcon:
 # each reporting its own position perfectly truthfully.
 BOT = """
 local function bot()
-  local found = game.surfaces.nauvis.find_entities_filtered{name='character', limit=1}[1]
-  if not found then
+  local wanted = remote.call('bonsai', 'body_id')
+  if not wanted then
     remote.call('bonsai', 'spawn', 'Bonsai')
-    found = game.surfaces.nauvis.find_entities_filtered{name='character', limit=1}[1]
+    wanted = remote.call('bonsai', 'body_id')
   end
-  return found
+  for _, c in pairs(game.surfaces.nauvis.find_entities_filtered{name='character'}) do
+    if c.unit_number == wanted then return c end
+  end
+  return nil
 end
 """
 
@@ -94,7 +97,9 @@ ACTIONS = {
         "description": "Look at what is around you: the nearest ore patches, what you "
                        "are carrying, and where you are standing.",
         "lua": BOT + """
-local c = bot() local s = c.surface local p = c.position
+local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
+local s = c.surface local p = c.position
 local found = {}
 for _, name in pairs({'iron-ore','copper-ore','coal','stone','crude-oil'}) do
   local e = s.find_entities_filtered{position=p, radius=250, name=name, limit=1}[1]
@@ -125,7 +130,9 @@ rcon.print('You are at '..math.floor(p.x)..','..math.floor(p.y)..
                                   "into": {"type": "string"},
                                   "count": {"type": "integer"}}},
         "lua": BOT + """
-local c = bot() local s = c.surface
+local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
+local s = c.surface
 local machine = s.find_entities_filtered{position=c.position, radius=12,
                                          name='ARG_into', limit=1}[1]
 if not machine then
@@ -149,7 +156,9 @@ end
         "schema": {"type": "object", "required": ["from"],
                    "properties": {"from": {"type": "string"}}},
         "lua": BOT + """
-local c = bot() local s = c.surface
+local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
+local s = c.surface
 local machine = s.find_entities_filtered{position=c.position, radius=12,
                                          name='ARG_from', limit=1}[1]
 if not machine then rcon.print('There is no ARG_from within reach.') return end
@@ -182,7 +191,9 @@ end
                        "resource": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
                        "count": {"type": "integer"}}},
         "lua": BOT + """
-local c = bot() local s = c.surface
+local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
+local s = c.surface
 local want = ARG_count
 local got = 0
 for _ = 1, want do
@@ -211,6 +222,7 @@ end
                                   "count": {"type": "integer"}}},
         "lua": BOT + """
 local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
 local recipe = prototypes.recipe['ARG_item']
 if not recipe then
   rcon.print('There is no recipe called ARG_item. Factorio names look like '..
@@ -243,7 +255,9 @@ end
                    "properties": {"entity": {"type": "string"},
                                   "x": {"type": "integer"}, "y": {"type": "integer"}}},
         "lua": BOT + """
-local c = bot() local s = c.surface
+local c = bot()
+if not c then rcon.print('Bonsai has no body right now.') return end
+local s = c.surface
 if c.get_item_count('ARG_entity') < 1 then
   rcon.print('You are not carrying a ARG_entity, so there is nothing to place.')
   return
@@ -393,11 +407,16 @@ async def play(rcon, url, quiet, server_log=None):
         await send("context", {"message": f"You have just arrived on Nauvis. {state}",
                                "silent": quiet})
         done = asyncio.Event()
+        said_to_us = []
 
         async def relay(kind, text):
             print(f"CHAT {text}")
             if kind == "CHAT":
-                rcon.lua(f"game.print('[Bonsai heard you]')")
+                # Not "[Bonsai heard you]": that was printed the instant the line was
+                # read, before anything had been decided, and it was usually followed
+                # by Bonsai carrying on about iron. Saying it heard you is the game's
+                # job only once it has actually said something back.
+                said_to_us.append(text)
             await send("context", {
                 "message": (f"Someone playing alongside you said: {text}" if kind == "CHAT"
                             else f"{text} ({kind.lower()}ed the game)"),
@@ -448,8 +467,20 @@ async def play(rcon, url, quiet, server_log=None):
         async def driver():
             while True:
                 done.clear()
+                # What they said goes into the decision itself, not only into a
+                # side channel. As a context message it competed with a forced action
+                # every couple of seconds and lost: asked for a furnace, Bonsai went
+                # back to talking about iron.
+                heard = ""
+                if said_to_us:
+                    heard = ("\n\nSomeone is playing in this world with you and just "
+                             "said:\n" + "\n".join(f"- {line}" for line in said_to_us)
+                             + "\nThey are a person, not a prompt. If they asked for "
+                             "something, do that next instead of what you had planned, "
+                             "and say something back.")
+                    said_to_us.clear()
                 await send("actions/force", {
-                    "state": state,
+                    "state": state + heard,
                     "query": "It is your turn. Do one thing that gets you closer to an "
                              "automated factory - you will need iron, and a burner "
                              "mining drill on an ore patch is the usual first step.",
