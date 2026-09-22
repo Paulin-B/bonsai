@@ -14,6 +14,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import wave
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -247,6 +249,41 @@ def synthesise(text, path):
     return None
 
 
+ENVELOPE_HZ = 20
+
+
+def envelope(path):
+    """The loudness of a wav over time, one value per 50ms, scaled 0 to 1.
+
+    Read from the file rather than sampled from the output, because there is no way
+    to tap what the player is sending to the speakers without another dependency, and
+    the file is right there and says the same thing."""
+    try:
+        with wave.open(str(path)) as sound:
+            rate = sound.getframerate()
+            width = sound.getsampwidth()
+            frames = sound.readframes(sound.getnframes())
+    except Exception:
+        return [], 0.0
+    if width != 2 or not frames:
+        return [], 0.0
+    step = max(1, rate // ENVELOPE_HZ) * 2
+    levels = []
+    for start in range(0, len(frames) - 1, step):
+        chunk = frames[start:start + step]
+        total = 0
+        for index in range(0, len(chunk) - 1, 2):
+            sample = int.from_bytes(chunk[index:index + 2], "little", signed=True)
+            total += sample if sample >= 0 else -sample
+        levels.append(total / max(1, len(chunk) / 2))
+    loudest = max(levels) if levels else 0
+    if loudest <= 0:
+        return [], 0.0
+    # Against the loudest part of this line rather than the format's maximum: speech
+    # peaks nowhere near full scale, and a mouth scaled to full scale barely moves.
+    return [min(1.0, value / loudest) for value in levels], len(frames) / 2 / rate
+
+
 class Speaker(QThread):
     """Speaks queued lines, one after another, and can be shut up mid-sentence.
 
@@ -254,6 +291,11 @@ class Speaker(QThread):
     over each other, and a voice interrupting itself is unlistenable."""
 
     failed = pyqtSignal(str)
+    # How loud it is right now, 0 to 1, about twenty times a second. The avatar's
+    # mouth follows this: a mouth that opens and shuts on a timer looks like a puppet,
+    # one that follows the actual waveform looks like speech.
+    level = pyqtSignal(float)
+    talking = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -303,12 +345,22 @@ class Speaker(QThread):
                 if problem:
                     self.failed.emit(problem)
                     return          # it will not start working on the next line
+                levels, seconds = envelope(wav)
                 process = subprocess.Popen(play + [str(wav)],
                                            stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL)
                 self._playing = process
-                process.wait()
+                self.talking.emit(True)
+                started = time.monotonic()
+                while process.poll() is None:
+                    if levels and seconds:
+                        elapsed = time.monotonic() - started
+                        index = int(elapsed * len(levels) / seconds)
+                        self.level.emit(levels[index] if index < len(levels) else 0.0)
+                    time.sleep(1.0 / ENVELOPE_HZ)
                 self._playing = None
+                self.talking.emit(False)
+                self.level.emit(0.0)
             except Exception as exc:
                 self.failed.emit(f"Speech failed: {exc}")
                 return

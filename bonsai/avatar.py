@@ -1,0 +1,239 @@
+"""A face for it.
+
+A PNGTuber is a handful of pictures swapped on two signals: is it talking, and how
+does it feel. That is the whole idea, and it is why this is worth doing before
+anything involving a 3D runtime - both signals already exist here. The speaker emits
+the loudness of what it is saying twenty times a second, and the mood is a number on
+disk that survives the session.
+
+It lives in its own frameless window rather than in the layout, because that is what
+a PNGTuber is for: something to put in a corner and point OBS at. It also means the
+main window is untouched by it.
+
+With no art it draws itself - a potted tree with a face, which is on the nose but
+means the feature works the moment it is switched on. Drop PNGs in the avatar folder
+and they are used instead.
+"""
+import random
+from pathlib import Path
+
+from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
+
+from .store import load_mood, settings
+
+AVATAR_DIR = Path.home() / ".local/share/bonsai_avatar"
+
+# What a folder of art may provide. Anything missing falls back to the drawing, so a
+# folder with one file in it is a perfectly good start.
+STATES = ("idle", "talk", "think")
+
+
+def art_for(state, mood_name, openness):
+    """The picture for this moment, or None to draw it.
+
+    Looked up from most specific to least: a mouth shape for this mood, a mouth shape,
+    this state in this mood, this state. Whoever is drawing can provide as much or as
+    little of that as they like."""
+    folder = Path((settings().get("avatar_folder") or "").strip() or AVATAR_DIR)
+    if not folder.is_dir():
+        return None
+    mouth = min(3, int(openness * 4)) if state == "talk" else 0
+    names = []
+    if state == "talk":
+        names += [f"talk-{mouth}-{mood_name}.png", f"talk-{mouth}.png"]
+    names += [f"{state}-{mood_name}.png", f"{state}.png", "idle.png"]
+    for name in names:
+        candidate = folder / name.replace(" ", "-")
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+class Avatar(QWidget):
+    """Draws the face. Knows nothing about where the numbers come from."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.state = "idle"
+        self.openness = 0.0
+        self.mood_value, self.mood_name = 0.0, "steady"
+        self.blink = 0.0
+        self.think_tick = 0
+        self._cache = {}
+        self.setMinimumSize(160, 200)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+
+        # Blinking is the cheapest thing that makes a static drawing look alive, and
+        # it costs one timer.
+        self.blinker = QTimer(self)
+        self.blinker.timeout.connect(self._blink)
+        self.blinker.start(200)
+        self._until_blink = 12
+
+    def _blink(self):
+        if self.state == "think":
+            self.think_tick += 1
+        if self.blink > 0:
+            self.blink = max(0.0, self.blink - 0.5)
+        else:
+            self._until_blink -= 1
+            if self._until_blink <= 0:
+                self.blink = 1.0
+                self._until_blink = random.randint(10, 30)
+        self.update()
+
+    def set_state(self, state):
+        if state != self.state:
+            self.state = state
+            self.update()
+
+    def set_level(self, level):
+        # Smoothed towards the new value: at twenty frames a second the raw envelope
+        # chatters, and a mouth that chatters reads as a glitch rather than as speech.
+        self.openness += (max(0.0, min(1.0, level)) - self.openness) * 0.6
+        self.update()
+
+    def refresh_mood(self):
+        self.mood_value, self.mood_name, _ = load_mood()
+        self.update()
+
+    # -- drawing -------------------------------------------------------------
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        picture = art_for(self.state, self.mood_name, self.openness)
+        if picture:
+            pixmap = self._cache.get(picture)
+            if pixmap is None:
+                pixmap = QPixmap(picture)
+                self._cache[picture] = pixmap
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                       Qt.TransformationMode.SmoothTransformation)
+                painter.drawPixmap((self.width() - scaled.width()) // 2,
+                                   (self.height() - scaled.height()) // 2, scaled)
+                return
+        self._draw_tree(painter)
+
+    def _draw_tree(self, painter):
+        width, height = self.width(), self.height()
+        unit = min(width / 160, height / 200)
+        middle = width / 2
+
+        # Mood tints the leaves: greener when it is going well, browner when it is not.
+        leaf = QColor("#4c9f68") if self.mood_value >= 0 else QColor("#8a7f4a")
+        leaf = leaf.lighter(100 + int(abs(self.mood_value) * 18))
+
+        pot = QPainterPath()
+        pot.moveTo(middle - 34 * unit, height - 16 * unit)
+        pot.lineTo(middle + 34 * unit, height - 16 * unit)
+        pot.lineTo(middle + 26 * unit, height - 2 * unit)
+        pot.lineTo(middle - 26 * unit, height - 2 * unit)
+        pot.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#6b4630")))
+        painter.drawPath(pot)
+        painter.setBrush(QBrush(QColor("#7d523a")))
+        painter.drawRect(QRectF(middle - 38 * unit, height - 22 * unit,
+                                76 * unit, 8 * unit))
+
+        painter.setBrush(QBrush(QColor("#5a4632")))
+        painter.drawRect(QRectF(middle - 5 * unit, height - 74 * unit,
+                                10 * unit, 54 * unit))
+
+        painter.setBrush(QBrush(leaf))
+        for dx, dy, r in ((-26, -92, 26), (24, -96, 24), (0, -112, 30), (-4, -78, 24)):
+            painter.drawEllipse(QRectF(middle + (dx - r) * unit,
+                                       height + (dy - r) * unit,
+                                       r * 2 * unit, r * 2 * unit))
+
+        eye_y = height - 104 * unit
+        open_eye = 1.0 - self.blink
+        if self.state == "think":
+            eye_y -= 3 * unit          # looking up, which is what thinking looks like
+        for side in (-1, 1):
+            x = middle + side * 13 * unit
+            painter.setBrush(QBrush(QColor("#f4f6f2")))
+            painter.drawEllipse(QRectF(x - 9 * unit, eye_y - 9 * unit * open_eye,
+                                       18 * unit, 18 * unit * max(0.08, open_eye)))
+            if open_eye > 0.3:
+                painter.setBrush(QBrush(QColor("#22302a")))
+                look = -2 * unit if self.state == "think" else 0
+                painter.drawEllipse(QRectF(x - 4 * unit, eye_y - 4 * unit + look,
+                                           8 * unit, 8 * unit))
+
+        # Brows carry the mood, because eyes alone cannot: the same eyes read as
+        # pleased or fed up depending only on what is above them.
+        painter.setPen(QPen(QColor("#22302a"), 2.2 * unit, Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap))
+        tilt = -3 * unit if self.mood_value >= 0.2 else (3 * unit
+                                                        if self.mood_value <= -0.2 else 0)
+        for side in (-1, 1):
+            x = middle + side * 13 * unit
+            painter.drawLine(QPoint(int(x - 8 * unit), int(eye_y - 15 * unit + side * tilt)),
+                             QPoint(int(x + 8 * unit), int(eye_y - 15 * unit - side * tilt)))
+
+        if self.state == "think":
+            # Eyes looking up is too subtle on its own - side by side with idle you
+            # cannot tell them apart. Dots that fill in say it plainly.
+            painter.setPen(Qt.PenStyle.NoPen)
+            for index in range(3):
+                lit = (self.think_tick // 4) % 3 >= index
+                painter.setBrush(QBrush(QColor("#cfd8d2") if lit else QColor("#6d7a72")))
+                size = (6 if lit else 4) * unit
+                painter.drawEllipse(QRectF(middle + (14 + index * 11) * unit - size / 2,
+                                           height - 150 * unit - size / 2, size, size))
+
+        mouth_y = height - 86 * unit
+        painter.setBrush(QBrush(QColor("#22302a")))
+        painter.setPen(Qt.PenStyle.NoPen)
+        if self.state == "talk" and self.openness > 0.05:
+            tall = 3 * unit + self.openness * 13 * unit
+            painter.drawEllipse(QRectF(middle - 7 * unit, mouth_y - tall / 2,
+                                       14 * unit, tall))
+        else:
+            painter.setPen(QPen(QColor("#22302a"), 2.2 * unit, Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            curve = QPainterPath()
+            curve.moveTo(middle - 8 * unit, mouth_y)
+            bend = 5 * unit if self.mood_value >= 0 else -5 * unit
+            curve.quadTo(middle, mouth_y + bend, middle + 8 * unit, mouth_y)
+            painter.drawPath(curve)
+
+
+class AvatarWindow(QWidget):
+    """A small frameless window to put in a corner and point OBS at.
+
+    Transparent, always on top, and dragged by its face since it has no title bar."""
+
+    def __init__(self, parent=None):
+        super().__init__(None)
+        self.setWindowTitle("Bonsai")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+                            | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # A layout rather than a resizeEvent: resizing a window that has not been
+        # shown does not deliver one, and the face stayed at its minimum size.
+        self.avatar = Avatar(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.avatar)
+        self.resize(200, 250)
+        self._drag = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._drag is not None:
+            self.move(event.globalPosition().toPoint() - self._drag)
+
+    def mouseReleaseEvent(self, _event):
+        self._drag = None

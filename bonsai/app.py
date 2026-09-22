@@ -53,6 +53,9 @@ from .listen import (
 from .hotkey import (
     PushToTalk,
 )
+from .avatar import (
+    AvatarWindow,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -507,6 +510,8 @@ class Bonsai(QWidget):
         self.gamelink = None
         self.speaker = None
         self.listener = None
+        self.face = None
+        self._face_wired = False
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -753,6 +758,13 @@ class Bonsai(QWidget):
             "Listen for games that speak the Neuro API, so it plays through the game "
             "itself rather than by photographing the screen.",
             False, self.on_gamelink_toggled)
+        self.avatar_box = toggle(
+            "\U0001FAB4", "Avatar",
+            "A little window with a face in it: the mouth follows what is being said, "
+            "the expression follows its mood, and it thinks while it is working. "
+            "Frameless and always on top, so it can sit in a corner or be captured. "
+            "Drop PNGs in the avatar folder to use your own art.",
+            False, self.on_avatar_toggled)
         self.listen_box = toggle(
             "\U0001F3A4", "Microphone",
             "Hear what you say and put it in the box. One click off, so a call is not "
@@ -768,7 +780,8 @@ class Bonsai(QWidget):
 
         self.toggle_buttons = [self.vision_box, self.search_box, self.monitor_box,
                                self.proactive_box, self.play_box, self.gamelink_box,
-                               self.listen_box, self.speak_box]
+                               self.listen_box, self.speak_box,
+                               self.avatar_box]
 
         # Push-to-talk by key, not by holding the icon: the point of it is that you
         # are talking in a game or a call, where Bonsai does not have focus and cannot
@@ -1830,6 +1843,7 @@ class Bonsai(QWidget):
         progress, but it is the difference between waiting and wondering whether it has
         hung."""
         self.busy_label = label
+        self.face_state("think")
         if self.busy_timer is None:
             self.bonsai.start()
             self.busy_since = time.time()
@@ -1849,6 +1863,10 @@ class Bonsai(QWidget):
             self.busy_timer = None
         self.bonsai.stop()
         self.status.setText("Ready")
+        self.face_state("idle")
+        # The mood moved during that turn, so the face should have moved with it.
+        if self.face is not None:
+            self.face.avatar.refresh_mood()
 
     def on_stream_chunk(self, piece):
         """Collect the reply as it is written, and repaint on a timer.
@@ -2316,7 +2334,43 @@ class Bonsai(QWidget):
         if self.speaker is None:
             self.speaker = Speaker()
             self.speaker.failed.connect(lambda why: self.log(why, "orange"))
+            self._wire_face()
         self.speaker.say(text)
+
+    def on_avatar_toggled(self):
+        if not self.avatar_box.isChecked():
+            if self.face is not None:
+                self.face.close()
+                self.face = None
+            return
+        self.face = AvatarWindow()
+        self.face.avatar.refresh_mood()
+        self.face.show()
+        # Whatever is already speaking should move its mouth, so the signals are
+        # hooked to the speaker rather than to the moment the window opened.
+        if self.speaker is not None:
+            self._wire_face()
+
+    def _wire_face(self):
+        """Point the speaker at the face, once, for whichever exists first."""
+        if self.face is None or self.speaker is None or self._face_wired:
+            return
+        self.speaker.level.connect(self._face_level)
+        self.speaker.talking.connect(self._face_talking)
+        self._face_wired = True
+
+    def _face_level(self, level):
+        if self.face is not None:
+            self.face.avatar.set_level(level)
+
+    def _face_talking(self, talking):
+        if self.face is not None:
+            self.face.avatar.set_state("talk" if talking else "idle")
+
+    def face_state(self, state):
+        """Called by the turn loop: thinking while it works, idle when it stops."""
+        if self.face is not None and self.face.avatar.state != "talk":
+            self.face.avatar.set_state(state)
 
     def on_listen_toggled(self):
         if not self.listen_box.isChecked():
@@ -2645,6 +2699,8 @@ class Bonsai(QWidget):
         if self.listener is not None:
             self.listener.stop()
             self.listener.wait(2000)
+        if self.face is not None:
+            self.face.close()
         if getattr(self, "ptt", None) is not None:
             self.ptt.stop()
             self.ptt.wait(1000)
