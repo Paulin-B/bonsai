@@ -5,6 +5,7 @@ Both were already here - the speaker emits the loudness of what it is saying twe
 times a second, and the mood is a number on disk that outlives the session. This is
 mostly the wiring between them, so that is mostly what is checked.
 """
+import json
 import sys
 from pathlib import Path
 from bonsai_under_test import load
@@ -139,6 +140,88 @@ w.avatar_box.setChecked(False)
 check("the toggle closes it", w.face, None)
 w.face_state("think")
 check("and nothing breaks when it is not there", w.face, None)
+
+print("\n-- a tiling compositor has to be told --")
+# Frameless and always-on-top mean nothing to Hyprland: it tiled the 200x250 window
+# and stretched it to 1163x1394, and Qt asking for its size back was ignored.
+import subprocess as sp
+sent = []
+real_run, real_which = ga.avatar.__dict__.get("_run"), None
+import shutil as sh
+class FakeRun:
+    stdout = "[]"
+def fake(argv, **kw):
+    sent.append(" ".join(argv))
+    return FakeRun()
+orig_run, orig_which = sp.run, sh.which
+sp.run, sh.which = fake, (lambda name: "/usr/bin/hyprctl")
+try:
+    ga.float_it(200, 250)
+    plain = list(sent)
+    sent.clear()
+    ga.float_it(200, 250, x=40, y=60)
+    placed = list(sent)
+finally:
+    sp.run, sh.which = orig_run, orig_which
+
+check("it floats the window", any("window.float" in c for c in plain), True)
+check("  ...sizes it exactly, or it keeps the tiled size",
+      any("exact=true" in c and "x=200" in c and "y=250" in c for c in plain), True)
+check("  ...and pins it, so it follows you between workspaces",
+      any("window.pin" in c for c in plain), True)
+check("float is sent once, since it is a toggle",
+      sum("window.float" in c for c in plain), 1)
+check("it targets itself by title, not whatever is focused",
+      all(ga.AVATAR_TITLE in c for c in plain), True)
+check("a remembered position is moved to", any("window.move" in c for c in placed), True)
+check("  ...and is not sent when there is none",
+      any("window.move" in c for c in plain), False)
+
+sh_which = sh.which
+sh.which = lambda name: None
+try:
+    check("no hyprctl means no compositor to argue with", ga.float_it(200, 250), False)
+    check("  ...and nothing to ask where it is", ga.hypr_geometry(), None)
+finally:
+    sh.which = sh_which
+
+print("\n-- where it is, asked of the one who knows --")
+# Under Wayland a client is not told where it is: Qt reported 60,60 for a window the
+# compositor had at 3946,37.
+CLIENTS = json.dumps([{"title": "something else", "at": [0, 0], "size": [10, 10]},
+                      {"title": ga.AVATAR_TITLE, "at": [3946, 37], "size": [200, 250]}])
+class Reply:
+    stdout = CLIENTS
+sp.run, sh.which = (lambda *a, **k: Reply()), (lambda name: "/usr/bin/hyprctl")
+try:
+    check("it finds itself among the windows", ga.hypr_geometry(), (3946, 37, 200, 250))
+    window = ga.AvatarWindow()
+    window.remember()
+    check("and saves what the compositor says, not what Qt guessed",
+          (ga.settings()["avatar_x"], ga.settings()["avatar_y"]), (3946, 37))
+    check("  ...including the size", ga.settings()["avatar_width"], 200)
+finally:
+    sp.run, sh.which = orig_run, orig_which
+
+print("\n-- resizing it, since there is no frame to drag --")
+ga.save_settings({**ga.DEFAULTS, "avatar_width": 200, "avatar_height": 250})
+window = ga.AvatarWindow()
+check("it opens at the remembered size", window.wanted, (200, 250))
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtCore import QPointF
+def scroll(widget, up):
+    widget.wheelEvent(QWheelEvent(
+        QPointF(10, 10), QPointF(10, 10), ga.QPoint(0, 0),
+        ga.QPoint(0, 120 if up else -120), ga.Qt.MouseButton.NoButton,
+        ga.Qt.KeyboardModifier.NoModifier, ga.Qt.ScrollPhase.NoScrollPhase, False))
+scroll(window, True)
+check("scrolling up makes it bigger", window.wanted[0], 220)
+check("  ...keeping its shape", window.wanted[1], 275)
+for _ in range(40): scroll(window, False)
+check("it will not shrink to nothing", window.wanted[0], 100)
+for _ in range(60): scroll(window, True)
+check("nor grow past the screen", window.wanted[0], 900)
+ga.save_settings(dict(ga.DEFAULTS))
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

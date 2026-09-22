@@ -14,6 +14,7 @@ With no art it draws itself - a potted tree with a face, which is on the nose bu
 means the feature works the moment it is switched on. Drop PNGs in the avatar folder
 and they are used instead.
 """
+import json
 import random
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
-from .store import load_mood, settings
+from .store import load_mood, save_settings, settings
 
 AVATAR_DIR = Path.home() / ".local/share/bonsai_avatar"
 
@@ -206,6 +207,62 @@ class Avatar(QWidget):
             painter.drawPath(curve)
 
 
+AVATAR_TITLE = "Bonsai Avatar"
+
+
+def hypr_geometry():
+    """Where the compositor actually has this window, or None.
+
+    Under Wayland a client is not told where it is and cannot move itself, so Qt's
+    x() and y() are its own fiction - it reported 60,60 for a window Hyprland had at
+    3946,37. The compositor is the only one who knows."""
+    import shutil
+    import subprocess
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True,
+                             text=True, timeout=4).stdout
+        for client in json.loads(out or "[]"):
+            if client.get("title") == AVATAR_TITLE:
+                return (*client["at"], *client["size"])
+    except Exception:
+        return None
+    return None
+
+
+def float_it(width, height, x=None, y=None):
+    """Ask Hyprland to leave this window alone.
+
+    Frameless and always-on-top mean nothing to a tiling compositor: Hyprland took
+    the 200x250 window, tiled it, and stretched it to 1163x1394. Qt asking for its
+    size back is ignored once that has happened, so the compositor has to be told -
+    float, then size exactly, then pin so it follows you between workspaces.
+
+    Only Hyprland is handled here. Everywhere else the Qt flags are enough, and a
+    missing hyprctl is simply not a tiling compositor's problem."""
+    import shutil
+    import subprocess
+    if not shutil.which("hyprctl"):
+        return False
+    target = f'window="title:{AVATAR_TITLE}"'
+    calls = [
+        # float is a toggle, so it is only ever sent to a freshly opened window.
+        f"hl.dsp.window.float{{{target}}}",
+        f"hl.dsp.window.resize{{{target}, x={int(width)}, y={int(height)}, exact=true}}",
+        f"hl.dsp.window.pin{{{target}}}",
+    ]
+    if x is not None and y is not None:
+        calls.append(f"hl.dsp.window.move{{{target}, x={int(x)}, y={int(y)}}}")
+    for call in calls:
+        try:
+            subprocess.run(["hyprctl", "dispatch", call], capture_output=True,
+                           text=True, timeout=4)
+        except Exception:
+            return False
+    return True
+
+
 class AvatarWindow(QWidget):
     """A small frameless window to put in a corner and point OBS at.
 
@@ -213,7 +270,7 @@ class AvatarWindow(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(None)
-        self.setWindowTitle("Bonsai")
+        self.setWindowTitle(AVATAR_TITLE)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
@@ -224,8 +281,43 @@ class AvatarWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.avatar)
-        self.resize(200, 250)
+        config = settings()
+        # The size that is wanted, kept separately from the size it currently has:
+        # by the time the compositor can be told anything, it has already tiled the
+        # window, and asking it to resize to its current size achieves nothing.
+        self.wanted = (max(100, int(config.get("avatar_width", 200))),
+                       max(100, int(config.get("avatar_height", 250))))
+        self.placed = (config.get("avatar_x", -1), config.get("avatar_y", -1))
+        self.resize(*self.wanted)
         self._drag = None
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # After it is mapped, or the compositor has no window to be told about yet.
+        QTimer.singleShot(150, self.claim_space)
+
+    def claim_space(self):
+        x, y = self.placed
+        float_it(*self.wanted, x=x if x >= 0 else None, y=y if y >= 0 else None)
+
+    def remember(self):
+        """Where you put it, so it opens there next time.
+
+        Asked of the compositor when there is one, because the window does not know
+        where it is and would otherwise save a position it invented."""
+        where = hypr_geometry()
+        x, y, width, height = where if where else (self.x(), self.y(),
+                                                   self.width(), self.height())
+        self.wanted = (width, height)
+        self.placed = (x, y)
+        saved = settings()
+        saved.update({"avatar_x": int(x), "avatar_y": int(y),
+                      "avatar_width": int(width), "avatar_height": int(height)})
+        save_settings(saved)
+
+    def closeEvent(self, event):
+        self.remember()
+        super().closeEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -236,4 +328,15 @@ class AvatarWindow(QWidget):
             self.move(event.globalPosition().toPoint() - self._drag)
 
     def mouseReleaseEvent(self, _event):
+        if self._drag is not None:
+            self.remember()
         self._drag = None
+
+    def wheelEvent(self, event):
+        """Scroll on the face to resize it - there is no frame to drag."""
+        step = 20 if event.angleDelta().y() > 0 else -20
+        width = max(100, min(900, self.wanted[0] + step))
+        self.wanted = (width, int(width * 1.25))
+        self.resize(*self.wanted)
+        float_it(*self.wanted)
+        self.remember()

@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-avatar"
+APP_VERSION = "2026-09-22-floating"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -204,6 +204,10 @@ DEFAULTS = {
     "speak_replies": False,        # say answers out loud (off: nobody wants surprise audio)
     "speak_unprompted": True,      # ...and the things it says without being asked
     "avatar_folder": "",           # blank uses ~/.local/share/bonsai_avatar
+    "avatar_x": -1,                # where you last dragged it; -1 means wherever
+    "avatar_y": -1,
+    "avatar_width": 200,
+    "avatar_height": 250,
     "listen_mode": "always",       # "always" or "push" - the mic icon switches it on
     "listen_source": "",           # blank is your default mic; a .monitor hears the room
     "listen_model": "small.en",    # tiny.en is 3x faster and hears "factorial" for Factorio
