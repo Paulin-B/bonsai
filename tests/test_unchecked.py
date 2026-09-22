@@ -158,5 +158,46 @@ check("a non-script argument is left alone",
 check("and a command that is not a shell is untouched",
       ga.without_shell_wrapper(["python3", "x.py"]), ["python3", "x.py"])
 
+print("\n-- a pipe is not a working directory --")
+# "ps aux | grep factorio | /dir" split on the FIRST pipe, so the folder became
+# "grep factorio | /dir" and the refusal talked about a missing working directory.
+# True, and silent about the pipe that caused it.
+for piped in ["ps aux | grep factorio | /home/paulinb",
+              "ps aux | grep factorio",
+              "cat x | wc -l | /home/paulinb"]:
+    argv, cwd, verdict = ga.classify_command(piped)
+    check(f"nothing runs: {piped[:34]}", argv, None)
+    check("  ...and the pipe is what it talks about", "no pipes" in verdict, True)
+    check("  ...explaining what | means here",
+          "separates the command from the folder" in verdict, True)
+
+check("a folder after a single pipe still works",
+      ga.classify_command("ls | /home/paulinb")[1], Path("/home/paulinb"))
+check("  ...and the command is intact", ga.classify_command("ls -la | /home/paulinb")[0],
+      ["ls", "-la"])
+check("a redirect is still refused without the pipe advice",
+      "separates the command" in ga.classify_command("echo hi > x | /home/paulinb")[2],
+      False)
+
+print("\n-- what a folder looks like --")
+for yes in ["/home/paulinb", "~/Projects", "./bridges", "../bonsai-public"]:
+    check(f"a folder: {yes}", ga.looks_like_folder(yes), True)
+for no in ["grep factorio", "wc -l", "", "sort | uniq"]:
+    check(f"not a folder: {no!r}", ga.looks_like_folder(no), False)
+
+print("\n-- a command that never finishes is pointed at BG --")
+# The launcher was RUN three times across two chats and timed out every time. The
+# message said only that it timed out, so it was tried again.
+ga.shell.COMMAND_TIMEOUT = 2
+ga.save_settings({**ga.DEFAULTS, "sandbox_commands": False})
+timed_out = ga.execute_command(["sleep", "20"], "/tmp")
+check("it still says it timed out", "Timed out after" in timed_out, True)
+check("but explains that RUN waits", "RUN waits for a command to finish" in timed_out, True)
+check("  ...names BG", "BG: START" in timed_out, True)
+check("  ...with the command and folder filled in",
+      "BG: START sleep 20 | /tmp" in timed_out, True)
+check("  ...and how to see its output", "BG: READ" in timed_out, True)
+check("  ...and not to retry with RUN", "will time out again" in timed_out, True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

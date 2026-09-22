@@ -128,6 +128,22 @@ SHELL_PROGRAMS = {"bash", "sh", "zsh", "fish", "cmd", "powershell", "pwsh", "exe
 SCRIPT_SUFFIXES = (".sh", ".bash", ".zsh", ".py", ".pl", ".rb")
 
 
+def looks_like_folder(text):
+    """Is this the working-directory half of a RUN, or part of the command?
+
+    A folder is a path. Anything else after a pipe is far likelier to be a pipeline
+    the model wrote out of habit, and treating it as a directory buries the real
+    mistake under a message about a missing folder."""
+    if not text or any(ch in text for ch in ";&|><`$"):
+        return False
+    if text.startswith(("/", "~", "./", "../")):
+        return True
+    try:
+        return Path(text).expanduser().is_dir()
+    except OSError:
+        return False
+
+
 def without_shell_wrapper(argv):
     """`sh start.sh` becomes `start.sh`. Anything else is returned untouched.
 
@@ -159,13 +175,25 @@ def classify_command(raw, background=False):
     `background` only relaxes the desktop-application refusal, which exists because RUN
     waits for the command to finish. A process started in the background is not waited
     on, so a game or a dev server is exactly what it is for."""
-    parts = [p.strip() for p in raw.split("|", 1)]
-    command = parts[0]
-    workdir_raw = parts[1] if len(parts) > 1 else ""
+    # The folder is whatever follows the LAST pipe, and only if it looks like a folder.
+    # Splitting on the first one made "ps aux | grep factorio | /dir" into the command
+    # "ps aux" run in a directory called "grep factorio | /dir", and the refusal that
+    # came back talked about a missing working directory - which is true, and says
+    # nothing about the pipe that caused it.
+    command, workdir_raw = raw.strip(), ""
+    head, sep, tail = raw.rpartition("|")
+    if sep and looks_like_folder(tail.strip()):
+        command, workdir_raw = head.strip(), tail.strip()
 
     if any(ch in command for ch in ";&|><`$\n"):
-        return None, None, ("[Refused: shell metacharacters aren't supported. Commands run "
-                            "directly, not through a shell. Issue one plain command.]")
+        piped = "|" in command
+        return None, None, ("[Refused: shell metacharacters aren't supported. Commands "
+                            "run directly, not through a shell, so there are no pipes "
+                            "or redirects. Issue one plain command."
+                            + (" Here | separates the command from the folder to run "
+                               "it in, and only the last one does that: "
+                               "'<command> | /path/to/folder'." if piped else "")
+                            + "]")
     try:
         argv = shlex.split(command)
     except ValueError as exc:
@@ -316,7 +344,15 @@ def execute_command(argv, workdir, sandbox=None):
     except FileNotFoundError:
         return f"[Command not found: {argv[0]}]"
     except subprocess.TimeoutExpired:
-        return f"[Timed out after {COMMAND_TIMEOUT}s: {' '.join(argv)}]"
+        # RUN waits for the command to finish, so anything that is not meant to finish
+        # - a server, a watcher, a game - always ends here. Saying only that it timed
+        # out got the same command retried twice more; naming BG is the whole answer.
+        return (f"[Timed out after {COMMAND_TIMEOUT}s: {' '.join(argv)}\n"
+                "RUN waits for a command to finish. If this one is not supposed to "
+                "finish - a server, a watcher, anything that keeps running - start it "
+                "with BG instead, which does not wait:  BG: START "
+                f"{' '.join(argv)} | {workdir}  . Then BG: READ its name to see its "
+                "output. Do not run it with RUN again; it will time out again.]")
     except Exception as exc:
         return f"[Command failed: {exc}]"
 
