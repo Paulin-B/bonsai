@@ -694,6 +694,9 @@ class SettingsDialog(QDialog):
         self.check("Voice", "speak_replies", "Say answers out loud")
         self.check("Voice", "speak_unprompted",
                    "Also say the things it volunteers (proactive remarks, game chat)")
+        self.line("Voice", "kokoro_voice", "Kokoro voice:",
+                  "One of 54. af_heart, af_bella and af_nicole are warm; am_michael "
+                  "and am_adam are male; bf_* and bm_* are British.")
         self.line("Voice", "speech_model", "Voice model (piper .onnx):",
                   "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
                   ".onnx.json beside it.")

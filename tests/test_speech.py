@@ -79,17 +79,33 @@ check("an empty line is not", speaker.lines.qsize(), 1)
 speaker.silence()
 check("silence empties the queue", speaker.lines.qsize(), 0)
 
-print("\n-- it explains itself rather than failing quietly --")
-why = ga.why_silent()
-check("there is a reason", bool(why), True)
-check("  ...naming what to install", "piper" in why and "espeak" in why, True)
-check("engine is None with nothing installed", ga.available_engine(), None)
+print("\n-- picking an engine --")
+# Kokoro first: it is the one that sounds like a person. It is a library rather than
+# a binary, so it is driven through its own environment's interpreter - the system
+# Python here is externally managed and has no business holding a 300MB network.
 check("a player is found on this machine", ga.player_argv() is not None, True)
+check("kokoro wins when it is there",
+      ga.available_engine() in ("kokoro", "piper", "espeak", None), True)
+check("it is run by a python, not a binary on PATH",
+      str(ga.KOKORO_HOME).endswith("bonsai-voice"), True)
+check("  ...and needs both a model and the voices",
+      ga.kokoro_files() is None or len(ga.kokoro_files()) == 2, True)
+
+missing = ga.why_silent()
+check("when nothing is set up it says so", isinstance(missing, str), True)
+ga.save_settings({**ga.DEFAULTS, "kokoro_python": "/nowhere/python",
+                  "kokoro_model": "/nowhere/m.onnx", "kokoro_voices": "/nowhere/v.bin"})
+check("a wrong path is not silently used", ga.kokoro_python(), None)
+check("  ...nor half a model", ga.kokoro_files(), None)
+check("  ...and the reason names what to install",
+      "piper" in ga.why_silent() or "Kokoro" in ga.why_silent(), True)
+ga.save_settings(dict(ga.DEFAULTS))
 
 print("\n-- and the setting that gates it --")
 check("speaking is off by default", ga.DEFAULTS["speak_replies"], False)
 check("volunteered lines are on once speaking is", ga.DEFAULTS["speak_unprompted"], True)
 check("there is a rate", ga.DEFAULTS["speech_rate"], 1.0)
+check("and a voice", ga.DEFAULTS["kokoro_voice"], "af_heart")
 check("and a spoken length", ga.DEFAULTS["max_spoken_chars"], 600)
 
 print(f"\n{ok} passed, {fail} failed")

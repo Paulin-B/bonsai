@@ -26,6 +26,30 @@ from .store import settings
 # like a person and runs on the CPU, which matters here because both GPUs are busy
 # holding the model. espeak-ng sounds like 1987 but needs no model file, so it is a
 # fair fallback rather than nothing.
+# Kokoro is a library, not a binary, and it lives in its own virtual environment: the
+# system Python here is externally managed, and installing a 300MB neural network into
+# it to make an assistant talk is not a reasonable thing to do to someone's machine.
+# So it is driven the way piper is - a subprocess that takes text and writes a wav.
+KOKORO_HOME = Path.home() / ".local/share/bonsai-voice"
+KOKORO_MODELS = Path.home() / ".local/share/bonsai_voices"
+
+
+def kokoro_python():
+    configured = (settings().get("kokoro_python") or "").strip()
+    candidate = Path(configured).expanduser() if configured else KOKORO_HOME / "bin/python"
+    return candidate if candidate.is_file() else None
+
+
+def kokoro_files():
+    """(model, voices) if both are there, else None."""
+    config = settings()
+    model = Path((config.get("kokoro_model") or "").strip()
+                 or KOKORO_MODELS / "kokoro.onnx").expanduser()
+    voices = Path((config.get("kokoro_voices") or "").strip()
+                  or KOKORO_MODELS / "voices.bin").expanduser()
+    return (model, voices) if model.is_file() and voices.is_file() else None
+
+
 def piper_binary():
     return shutil.which("piper") or shutil.which("piper-tts")
 
@@ -52,6 +76,8 @@ def player_argv():
 def available_engine():
     """Which engine will be used, or None. Named so the UI can say which."""
     config = settings()
+    if kokoro_python() and kokoro_files():
+        return "kokoro"
     model = (config.get("speech_model") or "").strip()
     if piper_binary() and model and Path(model).expanduser().is_file():
         return "piper"
@@ -65,6 +91,9 @@ def why_silent():
     if not player_argv():
         return ("Nothing to play sound with - none of pw-play, paplay, aplay or "
                 "ffplay is installed.")
+    if kokoro_python() and not kokoro_files():
+        return (f"Kokoro is installed but its model is missing. Expected "
+                f"{KOKORO_MODELS}/kokoro.onnx and voices.bin.")
     model = (settings().get("speech_model") or "").strip()
     if piper_binary() and not model:
         return ("piper is installed but no voice model is set. Point 'Voice model' in "
@@ -143,7 +172,16 @@ def synthesise(text, path):
     """Write `text` to `path` as a wav. Returns None, or a reason it did not."""
     config = settings()
     engine = available_engine()
-    if engine == "piper":
+    if engine == "kokoro":
+        model, voices = kokoro_files()
+        # By path, not -m: the module form imports bonsai/__init__.py, which pulls in
+        # PyQt6 and everything else, none of which is in the voice environment.
+        argv = [str(kokoro_python()), str(Path(__file__).with_name("kokoro_say.py")),
+                "--model", str(model), "--voices", str(voices),
+                "--voice", config.get("kokoro_voice", "af_heart"),
+                "--speed", str(config.get("speech_rate", 1.0)),
+                "--out", str(path)]
+    elif engine == "piper":
         model = str(Path(config["speech_model"]).expanduser())
         argv = [piper_binary(), "--model", model, "--output_file", str(path)]
         rate = config.get("speech_rate", 1.0)
@@ -158,8 +196,10 @@ def synthesise(text, path):
     else:
         return why_silent()
     try:
+        # Run from the project root so `-m bonsai.kokoro_say` resolves; the venv holds
+        # kokoro-onnx, this tree holds the script.
         done = subprocess.run(argv, input=text, capture_output=True, text=True,
-                              timeout=60)
+                              timeout=120)
     except Exception as exc:
         return f"Speech failed: {exc}"
     if done.returncode != 0 or not Path(path).exists():

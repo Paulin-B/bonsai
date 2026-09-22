@@ -10,4 +10,9 @@ PyYAML>=6.0              # syntax checking for .yaml files
 tree-sitter>=0.23        # syntax checking and reference tracking for ~40 languages
 tree-sitter-language-pack>=1.0
 websockets>=12.0         # the Neuro API game link, so games can drive Bonsai directly
-piper-tts>=1.2           # a voice that sounds like a person (or install espeak-ng)
+# Speech is optional and lives in its own virtual environment, because the system
+# Python is often externally managed and a 300MB network does not belong in it:
+#   python3 -m venv ~/.local/share/bonsai-voice
+#   ~/.local/share/bonsai-voice/bin/pip install kokoro-onnx
+# then put kokoro.onnx and voices.bin in ~/.local/share/bonsai_voices/.
+# piper or espeak-ng on PATH also work, and need none of that.

@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-speech"
+APP_VERSION = "2026-09-22-kokoro"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -203,6 +203,10 @@ DEFAULTS = {
     "play_scope": "own",
     "speak_replies": False,        # say answers out loud (off: nobody wants surprise audio)
     "speak_unprompted": True,      # ...and the things it says without being asked
+    "kokoro_voice": "af_heart",    # one of 54; af_* are American female, am_* male
+    "kokoro_python": "",           # blank uses ~/.local/share/bonsai-voice/bin/python
+    "kokoro_model": "",            # blank uses ~/.local/share/bonsai_voices/kokoro.onnx
+    "kokoro_voices": "",           # blank uses ~/.local/share/bonsai_voices/voices.bin
     "speech_model": "",            # a piper .onnx; blank falls back to espeak-ng
     "speech_rate": 1.0,            # 1 is the engine's normal speed, 2 is twice as fast
     "max_spoken_chars": 600,       # a spoken preview, not the whole essay
