@@ -14,6 +14,7 @@ from . import shell  # noqa: F401
 from . import stage  # noqa: F401
 from . import speech  # noqa: F401
 from . import listen  # noqa: F401
+from . import hotkey  # noqa: F401
 from . import neuro  # noqa: F401
 from . import turns  # noqa: F401
 from . import chats  # noqa: F401
@@ -33,6 +34,7 @@ from .shell import *  # noqa: F401,F403
 from .stage import *  # noqa: F401,F403
 from .speech import *  # noqa: F401,F403
 from .listen import *  # noqa: F401,F403
+from .hotkey import *  # noqa: F401,F403
 from .neuro import *  # noqa: F401,F403
 from .turns import *  # noqa: F401,F403
 from .chats import *  # noqa: F401,F403

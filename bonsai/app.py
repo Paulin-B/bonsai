@@ -50,6 +50,9 @@ from .speech import (
 from .listen import (
     Listener, why_deaf,
 )
+from .hotkey import (
+    PushToTalk,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -767,10 +770,16 @@ class Bonsai(QWidget):
                                self.proactive_box, self.play_box, self.gamelink_box,
                                self.listen_box, self.speak_box]
 
-        # Push-to-talk: the switch has to open on press and close on release, not on
-        # the click finishing, or the first word of everything is missing.
-        self.listen_box.pressed.connect(lambda: self.hold_to_talk(True))
-        self.listen_box.released.connect(lambda: self.hold_to_talk(False))
+        # Push-to-talk by key, not by holding the icon: the point of it is that you
+        # are talking in a game or a call, where Bonsai does not have focus and cannot
+        # be clicked. Wayland will not hand a key to an unfocused window, so the
+        # compositor holds the key and pokes a socket - see bonsai/ptt.py.
+        self.ptt = PushToTalk()
+        self.ptt.held.connect(self.hold_to_talk)
+        self.ptt.toggled.connect(
+            lambda: self.listen_box.setChecked(not self.listen_box.isChecked()))
+        self.ptt.failed.connect(lambda why: self.log(why, "orange"))
+        self.ptt.start()
 
         composer_wrap = QWidget()
         wrap_layout = QVBoxLayout(composer_wrap)
@@ -2335,10 +2344,18 @@ class Bonsai(QWidget):
         self.log("--- starting to listen (the transcriber takes a moment) ---")
 
     def hold_to_talk(self, down):
-        """Only meaningful on push-to-talk; harmless otherwise."""
-        if (self.listener is not None
-                and self.settings.get("listen_mode", "always") == "push"):
+        """The key went down or came up. Only meaningful on push-to-talk.
+
+        Holding the key with the microphone switched off turns it on for the duration:
+        pressing talk should talk, not silently do nothing because a toggle elsewhere
+        was off."""
+        if self.settings.get("listen_mode", "always") != "push":
+            return
+        if down and not self.listen_box.isChecked():
+            self.listen_box.setChecked(True)     # starts the listener, closed
+        if self.listener is not None:
             self.listener.set_open(down)
+            self.status.setText("Listening..." if down else "Ready")
 
     def on_heard(self, text):
         self.log(f"\U0001F3A4 heard: {text}")
@@ -2628,6 +2645,9 @@ class Bonsai(QWidget):
         if self.listener is not None:
             self.listener.stop()
             self.listener.wait(2000)
+        if getattr(self, "ptt", None) is not None:
+            self.ptt.stop()
+            self.ptt.wait(1000)
         closed = stop_stage()
         if closed:
             self.log(f"Closed the stage on {closed}.")

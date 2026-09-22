@@ -108,5 +108,48 @@ w.on_heard("start the server")
 check("and stands alone when the box is empty", w.input.text().strip(), "start the server")
 check("nothing was sent", w.input.text().strip() != "", True)
 
+print("\n-- push to talk, from outside the window --")
+# Wayland will not give an unfocused window a key, and push-to-talk is exactly the
+# unfocused case: you are in a game or a call. So the compositor keeps the key and
+# sends a word down a socket.
+import subprocess, time, os
+w.ptt.stop(); w.ptt.wait(1000)
+hot = ga.PushToTalk()
+pressed = []
+hot.held.connect(pressed.append, ga.Qt.ConnectionType.DirectConnection)
+flips = []
+hot.toggled.connect(lambda: flips.append(1), ga.Qt.ConnectionType.DirectConnection)
+hot.start()
+for _ in range(30):
+    time.sleep(0.02)
+    if os.path.exists(ga.socket_path()): break
+check("it listens on a socket in the runtime directory",
+      ga.socket_path().startswith(os.environ.get("XDG_RUNTIME_DIR", "/tmp")), True)
+check("  ...which only you can write to", oct(os.stat(ga.socket_path()).st_mode)[-3:], "600")
+
+for word in ("on", "off", "on", "toggle"):
+    ga.ptt.send(word)
+time.sleep(0.3)
+for _ in range(6): app.processEvents()
+check("press and release arrive in order", pressed, [True, False, True])
+check("and toggle is its own thing", len(flips), 1)
+
+hot.stop(); hot.wait(1500)
+check("the socket is cleaned up on the way out", os.path.exists(ga.socket_path()), False)
+check("sending to nothing fails quietly rather than raising",
+      ga.ptt.send("on"), False)
+
+print("\n-- holding the key with the mic off turns it on --")
+# Pressing talk should talk. Doing nothing because a toggle elsewhere was off is the
+# behaviour people file bugs about.
+w.settings["listen_mode"] = "push"
+w.listen_box.setChecked(False)
+w.hold_to_talk(True)
+check("the microphone comes on", w.listen_box.isChecked(), True)
+w.settings["listen_mode"] = "always"
+w.listen_box.setChecked(False)
+w.hold_to_talk(True)
+check("but not when it is not push-to-talk", w.listen_box.isChecked(), False)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
