@@ -119,8 +119,14 @@ ga.save_settings(dict(ga.DEFAULTS))
 
 check("the distance comes from the model's own size, not a guess",
       "Box3().setFromObject" in whole and "Math.tan(fov / 2)" in whole, True)
-check("  ...fitting width as well as height, or wide windows crop the arms",
-      "forWidth" in whole and "Math.max(forHeight, forWidth)" in whole, True)
+check("  ...fitting the height, so a tall window is filled rather than padded",
+      "forHeight * 1.06" in whole and "Math.max(forHeight, forWidth)" not in whole, True)
+check("the T-pose is replaced with something a person would stand in",
+      "const relax" in whole, True)
+check("  ...by rotating the arms down, not up",
+      "leftUpperArm: [0, 0, -1.22]" in whole, True)
+check("  ...and the framing happens after, since the pose changes the silhouette",
+      whole.index("relax();") < whole.index("frame();"), True)
 check("head framing finds the head bone rather than a fraction of the height",
       "getNormalizedBoneNode('head')" in whole, True)
 check("a snapshot frames for the canvas, not for a window of zero",

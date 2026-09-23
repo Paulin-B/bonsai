@@ -182,6 +182,7 @@ window.loadModel = (url) => {
     if (typeof VRMUtils.rotateVRM0 === 'function') VRMUtils.rotateVRM0(vrm);
     facing = vrm.scene.rotation.y;
     scene.add(vrm.scene);
+    relax();
     frame();
     setFraming(FRAMING);
     console.log('VRM_READY ' + (vrm.expressionManager
@@ -192,6 +193,27 @@ window.loadModel = (url) => {
 // The whole model in shot, worked out from its own bounding box rather than from a
 // guess at head height. Models differ - a chibi and a tall character are both valid
 // VRMs - so the distance comes from the height it actually is.
+// A VRM ships in a T-pose, which is a rigging convention rather than how anyone
+// stands. It also makes the model half again as wide as it is, so a portrait window
+// has to pull the camera back far enough to fit the arms and the result is a small
+// figure with a lot of empty sky above it.
+const relax = () => {
+  const bones = vrm && vrm.humanoid;
+  if (!bones) return;
+  const pose = {
+    // Negative brings the left arm down; positive raised it over her head, which is
+    // a cheerful pose but not a resting one.
+    leftUpperArm: [0, 0, -1.22], rightUpperArm: [0, 0, 1.22],
+    leftLowerArm: [0, -0.18, -0.12], rightLowerArm: [0, 0.18, 0.12],
+  };
+  for (const [name, [x, y, z]] of Object.entries(pose)) {
+    const node = bones.getNormalizedBoneNode(name);
+    if (node) node.rotation.set(x, y, z);
+  }
+  if (vrm.humanoid.update) vrm.humanoid.update();
+  vrm.scene.updateMatrixWorld(true);
+};
+
 let framing = 'full';
 window.setFraming = (mode) => { framing = mode; frame(); };
 
@@ -212,11 +234,16 @@ const frame = (ratio) => {
   }
   camera.aspect = ratio || aspect();
   const fov = camera.fov * Math.PI / 180;
-  // Fit whichever way round is tighter: a tall narrow window is limited by height,
-  // a wide one by width, and using height alone crops the arms off a wide one.
+  // Height, not whichever is tighter. Fitting the width as well is correct in the
+  // sense that nothing is ever cropped, and wrong in every other sense: an avatar
+  // window is tall and narrow, so the width was what the camera had to pull back
+  // for, and the figure ended up small with a column of empty sky above it.
+  //
+  // Nothing of consequence is lost. With the arms down the model is about 0.4 as
+  // wide as it is tall, so width only becomes the constraint in a window narrower
+  // than that - and what leaves the frame there is the outer edge of a sleeve.
   const forHeight = (size.y / 2) / Math.tan(fov / 2);
-  const forWidth = (size.x / 2) / Math.tan(fov / 2) / Math.max(0.001, camera.aspect);
-  camera.position.set(centre.x, centre.y, Math.max(forHeight, forWidth) * 1.12);
+  camera.position.set(centre.x, centre.y, forHeight * 1.06);
   camera.lookAt(centre);
   camera.updateProjectionMatrix();
 };
