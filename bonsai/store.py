@@ -65,7 +65,36 @@ def settings():
     return load_json(SETTINGS_FILE, DEFAULTS)
 
 
+def settings_look_emptied(before, after):
+    """Is this save about to throw away configuration rather than change it?
+
+    Only the fields that are painful to lose and impossible to guess: the servers,
+    where they live, and the compose files that start them. A value going from
+    something to nothing is the shape of an overwrite, not of an edit."""
+    losable = ("endpoints", "server_url", "observer_url", "compose_file",
+               "trusted_paths", "vault_path", "search_url")
+    return [key for key in losable
+            if before.get(key) not in (None, "", [], {}) and
+            after.get(key) in (None, "", [], {})]
+
+
 def save_settings(data):
+    """Write the settings, keeping the last version that had more in it.
+
+    A script that does save_settings({**DEFAULTS, "one_thing": x}) replaces the file
+    with defaults and loses every server the user configured. That has happened three
+    times in this project - each time from an ad-hoc script forgetting BONSAI_DATA_DIR
+    - and the .bak beside it was months old and no help. So a save that empties
+    something keeps the version before it, which turns an afternoon of reconstruction
+    into copying one file back."""
+    try:
+        if SETTINGS_FILE.exists():
+            before = load_json(SETTINGS_FILE, {})
+            if settings_look_emptied(before, data):
+                backup = SETTINGS_FILE.with_suffix(SETTINGS_FILE.suffix + ".bak")
+                save_json(backup, before)
+    except Exception:
+        pass        # a backup that fails must never stop the save it was protecting
     save_json(SETTINGS_FILE, data)
 
 

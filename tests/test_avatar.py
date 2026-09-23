@@ -188,13 +188,22 @@ finally:
 print("\n-- where it is, asked of the one who knows --")
 # Under Wayland a client is not told where it is: Qt reported 60,60 for a window the
 # compositor had at 3946,37.
-CLIENTS = json.dumps([{"title": "something else", "at": [0, 0], "size": [10, 10]},
-                      {"title": ga.AVATAR_TITLE, "at": [3946, 37], "size": [200, 250]}])
+import os
+# Two windows with the same title: one belonging to another Bonsai, one to this
+# process. A leftover from a crash looks exactly like the first, and taking it meant
+# a window adopted somebody else's size and position.
+CLIENTS = json.dumps([
+    {"title": "something else", "at": [0, 0], "size": [10, 10], "pid": os.getpid()},
+    {"title": ga.AVATAR_TITLE, "at": [1, 2], "size": [900, 189], "pid": os.getpid() + 1},
+    {"title": ga.AVATAR_TITLE, "at": [3946, 37], "size": [200, 250], "pid": os.getpid()},
+])
 class Reply:
     stdout = CLIENTS
 sp.run, sh.which = (lambda *a, **k: Reply()), (lambda name: "/usr/bin/hyprctl")
 try:
     check("it finds itself among the windows", ga.hypr_geometry(), (3946, 37, 200, 250))
+    check("  ...and not another Bonsai's window with the same title",
+          ga.hypr_geometry()[2:], (200, 250))
     window = ga.AvatarWindow()
     window.remember()
     check("and saves what the compositor says, not what Qt guessed",

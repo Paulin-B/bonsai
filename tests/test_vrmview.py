@@ -106,5 +106,25 @@ check("the app sets it before the QApplication exists, since Chromium reads it o
       APP.read_text().index("use_software_rendering()")
       < APP.read_text().index("app = QApplication(sys.argv)"), True)
 
+print("\n-- how much of the model is in shot --")
+check("the whole thing by default", ga.DEFAULTS["vrm_framing"], "full")
+ga.save_settings(dict(ga.DEFAULTS))
+whole = ga.vrmview.write_page().read_text()
+check("the page is told which", "const FRAMING = 'full'" in whole, True)
+ga.save_settings({**ga.DEFAULTS, "vrm_framing": "head"})
+close = ga.vrmview.write_page().read_text()
+check("and told the other when asked", "const FRAMING = 'head'" in close, True)
+check("nothing is left unsubstituted", "__FRAMING__" in close, False)
+ga.save_settings(dict(ga.DEFAULTS))
+
+check("the distance comes from the model's own size, not a guess",
+      "Box3().setFromObject" in whole and "Math.tan(fov / 2)" in whole, True)
+check("  ...fitting width as well as height, or wide windows crop the arms",
+      "forWidth" in whole and "Math.max(forHeight, forWidth)" in whole, True)
+check("head framing finds the head bone rather than a fraction of the height",
+      "getNormalizedBoneNode('head')" in whole, True)
+check("a snapshot frames for the canvas, not for a window of zero",
+      "frame(w / h)" in whole, True)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

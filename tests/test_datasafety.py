@@ -137,5 +137,32 @@ check("the file on disk still has every secret", (work / "main.tf").read_text(),
 out = ga.do_write(str(work / "fine.py"), "def add(a, b):\n    return a + b\n")
 check("an ordinary write is unaffected", out.startswith("Wrote "), True)
 
+print("\n-- a careless save keeps what it is about to throw away --")
+# Three times in this project an ad-hoc script has done
+# save_settings({**DEFAULTS, "one": x}) without BONSAI_DATA_DIR and replaced every
+# configured server with defaults. The .bak beside it was months old and no help.
+configured = {**ga.DEFAULTS,
+              "server_url": "http://localhost:8085/v1/chat/completions",
+              "endpoints": [{"name": "mine", "url": "http://localhost:8085/v1",
+                             "model": "", "compose": "/x.yml"}]}
+ga.save_settings(configured)
+ga.save_settings({**ga.DEFAULTS, "theme": "Paper"})        # the destructive shape
+check("the live file did get emptied", ga.settings()["endpoints"], [])
+backup = ga.SETTINGS_FILE.with_suffix(ga.SETTINGS_FILE.suffix + ".bak")
+check("but the version before it was kept", backup.exists(), True)
+kept = ga.load_json(backup, {})
+check("  ...with the servers still in it", len(kept.get("endpoints", [])), 1)
+check("  ...and the server URL", kept.get("server_url"),
+      "http://localhost:8085/v1/chat/completions")
+
+ga.save_settings(configured)
+before = ga.load_json(backup, {})
+ga.save_settings({**configured, "theme": "Midnight"})      # an ordinary edit
+check("an ordinary edit does not churn the backup", ga.load_json(backup, {}), before)
+check("what counts as emptying is named, not guessed",
+      ga.settings_look_emptied({"endpoints": [1]}, {"endpoints": []}), ["endpoints"])
+check("  ...and a value merely changing does not",
+      ga.settings_look_emptied({"server_url": "a"}, {"server_url": "b"}), [])
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

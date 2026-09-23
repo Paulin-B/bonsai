@@ -154,6 +154,7 @@ const light = new THREE.DirectionalLight(0xffffff, 2.2);
 light.position.set(1, 1, 1);
 scene.add(light, new THREE.AmbientLight(0xffffff, 1.1));
 
+const FRAMING = '__FRAMING__';
 let vrm = null;
 let facing = 0;
 let wanted = {};
@@ -181,18 +182,48 @@ window.loadModel = (url) => {
     if (typeof VRMUtils.rotateVRM0 === 'function') VRMUtils.rotateVRM0(vrm);
     facing = vrm.scene.rotation.y;
     scene.add(vrm.scene);
-    const head = vrm.humanoid?.getNormalizedBoneNode('head');
-    const y = head ? head.getWorldPosition(new THREE.Vector3()).y : 1.4;
-    camera.aspect = aspect();
-    camera.updateProjectionMatrix();
-    camera.position.set(0, y, 1.15);
-    camera.lookAt(0, y - 0.03, 0);
+    frame();
+    setFraming(FRAMING);
     console.log('VRM_READY ' + (vrm.expressionManager
       ? Object.keys(vrm.expressionManager.expressionMap).join(',') : ''));
   }, undefined, (err) => fail('Could not load the model: ' + err));
 };
 
+// The whole model in shot, worked out from its own bounding box rather than from a
+// guess at head height. Models differ - a chibi and a tall character are both valid
+// VRMs - so the distance comes from the height it actually is.
+let framing = 'full';
+window.setFraming = (mode) => { framing = mode; frame(); };
+
+const frame = (ratio) => {
+  if (!vrm) return;
+  const box = new THREE.Box3().setFromObject(vrm.scene);
+  let size = box.getSize(new THREE.Vector3());
+  let centre = box.getCenter(new THREE.Vector3());
+  if (framing === 'head') {
+    // From the head bone down a little, rather than a fraction of the height: a
+    // chibi model and a tall one have their faces in very different places.
+    const head = vrm.humanoid && vrm.humanoid.getNormalizedBoneNode('head');
+    if (head) {
+      const at = head.getWorldPosition(new THREE.Vector3());
+      centre = new THREE.Vector3(at.x, at.y - 0.05, at.z);
+      size = new THREE.Vector3(0.36, 0.42, 0.3);
+    }
+  }
+  camera.aspect = ratio || aspect();
+  const fov = camera.fov * Math.PI / 180;
+  // Fit whichever way round is tighter: a tall narrow window is limited by height,
+  // a wide one by width, and using height alone crops the arms off a wide one.
+  const forHeight = (size.y / 2) / Math.tan(fov / 2);
+  const forWidth = (size.x / 2) / Math.tan(fov / 2) / Math.max(0.001, camera.aspect);
+  camera.position.set(centre.x, centre.y, Math.max(forHeight, forWidth) * 1.12);
+  camera.lookAt(centre);
+  camera.updateProjectionMatrix();
+};
+
 window.setExpressions = (weights) => { wanted = weights || {}; };
+// Re-framed on demand, since resizing the window changes what fits.
+window.reframe = () => frame();
 
 // One frame's worth of work, kept out of the animation loop so that a snapshot can
 // do it too. requestAnimationFrame does not fire for a page that is not on screen,
@@ -226,8 +257,7 @@ render();
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = aspect();
-  camera.updateProjectionMatrix();
+  frame();
 });
 // Renders and hands back the pixels. The only way to see what a web view actually
 // drew: Qt's widget grab() captures the page's own compositing and comes back blank
@@ -252,8 +282,9 @@ window.snapshot = (w, h) => {
   // data URL, and looks exactly like a scene that rendered badly.
   if (w && h) {
     renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    // The canvas ratio, not the window's: an unlaid-out page reports a window of
+    // zero and the model would be framed for a shape it is not being drawn at.
+    frame(w / h);
   }
   advance(0.016);
   renderer.render(scene, camera);
@@ -266,8 +297,9 @@ console.log('VRM_PAGE_READY');
 
 def write_page():
     """The page lives beside the libraries so relative imports resolve."""
+    wanted = "head" if settings().get("vrm_framing") == "head" else "full"
     page = WEB_DIR / "avatar.html"
-    page.write_text(PAGE, encoding="utf-8")
+    page.write_text(PAGE.replace("__FRAMING__", wanted), encoding="utf-8")
     return page
 
 

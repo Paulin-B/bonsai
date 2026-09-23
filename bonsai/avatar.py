@@ -15,6 +15,7 @@ means the feature works the moment it is switched on. Drop PNGs in the avatar fo
 and they are used instead.
 """
 import json
+import os
 import random
 from pathlib import Path
 
@@ -223,8 +224,12 @@ def hypr_geometry():
     try:
         out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True,
                              text=True, timeout=4).stdout
+        mine = os.getpid()
         for client in json.loads(out or "[]"):
-            if client.get("title") == AVATAR_TITLE:
+            # By pid, not by title. A second Bonsai, or a window left over from a
+            # crash, has the same title - and taking the first match meant a window
+            # adopted the size and position of somebody else's.
+            if client.get("title") == AVATAR_TITLE and client.get("pid") == mine:
                 return (*client["at"], *client["size"])
     except Exception:
         return None
@@ -245,6 +250,9 @@ def float_it(width, height, x=None, y=None):
     import subprocess
     if not shutil.which("hyprctl"):
         return False
+    # Hyprland selects by title here, which is as specific as its selectors get for
+    # a window this process just opened; the pid check above is what keeps the
+    # geometry we read back our own.
     target = f'window="title:{AVATAR_TITLE}"'
     calls = [
         # float is a toggle, so it is only ever sent to a freshly opened window.

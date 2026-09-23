@@ -730,6 +730,9 @@ class SettingsDialog(QDialog):
                   "A 3D avatar, used instead of the drawn face. Its expressions follow "
                   "the mood and the mouth follows what is being said. The renderer is "
                   "downloaded once, the first time one is set.")
+        self.choice("Voice", "vrm_framing", "Show:",
+                    ["The whole model", "Head and shoulders"],
+                    values={"The whole model": "full", "Head and shoulders": "head"})
         self.line("Voice", "speech_model", "Voice model (piper .onnx):",
                   "Leave blank to use espeak-ng. Piper voices are a .onnx file with a "
                   ".onnx.json beside it.")

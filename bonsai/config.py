@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-nogpu"
+APP_VERSION = "2026-09-22-fullbody"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -204,6 +204,7 @@ DEFAULTS = {
     "speak_replies": False,        # say answers out loud (off: nobody wants surprise audio)
     "speak_unprompted": True,      # ...and the things it says without being asked
     "vrm_model": "",               # a .vrm file; set, it is used instead of the drawing
+    "vrm_framing": "full",         # "full" shows all of it, "head" is head and shoulders
     "vrm_use_gpu": False,          # off: GPU compositing corrupts the display here
     "avatar_folder": "",           # blank uses ~/.local/share/bonsai_avatar
     "avatar_x": -1,                # where you last dragged it; -1 means wherever
