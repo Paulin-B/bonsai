@@ -16,3 +16,8 @@ tests/autocases/
 
 # Anything a run leaves behind
 *.log
+
+# Avatar models: personal, large, and often licensed for your use rather than
+# for redistribution. Point Settings at one wherever you keep it.
+*.vrm
+*.vrma
