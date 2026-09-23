@@ -368,6 +368,31 @@ QToolTip {{ background: {c['raised']}; color: {c['text']};
 /* The toggles are icons now, sitting in the footer beside the tree. Unchecked they
    are quiet enough to ignore; checked they are the accent colour, because whether
    the microphone or the screen is on is the one thing you want to see at a glance. */
+/* The avatar's own strip. Dark and translucent whatever the app theme is: it sits
+   over a transparent window on somebody's desktop or in a stream, where the theme of
+   the app behind it is not what it has to read against. */
+#avatarPanel {{
+    background: rgba(18, 18, 22, 0.82); border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+}}
+#avatarCaption {{
+    color: #f2f3f5; font-size: 14px; background: transparent; padding: 2px 2px 4px 2px;
+}}
+#avatarState {{ color: #9aa3ad; font-size: 12px; background: transparent; }}
+QToolButton#avatarControl {{
+    background: transparent; border: none; border-radius: 8px; padding: 4px 7px;
+    font-size: 15px; color: #c9d1d9;
+}}
+QToolButton#avatarControl:hover {{ background: rgba(255, 255, 255, 0.10); }}
+QToolButton#avatarControl:checked {{
+    background: rgba(255, 255, 255, 0.14); color: #ffffff;
+}}
+#avatarEntry {{
+    background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px; padding: 7px 10px; color: #f2f3f5; font-size: 13px;
+}}
+#avatarEntry:focus {{ border: 1px solid {c['accent']}; }}
+
 QToolButton#iconToggle {{
     background: transparent; border: 1px solid transparent; border-radius: 6px;
     padding: 3px 5px; font-size: 15px; color: {c['muted']};

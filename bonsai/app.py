@@ -59,6 +59,9 @@ from .avatar import (
 from .vrmview import (
     use_software_rendering,
 )
+from .vrm import (
+    emotion_face,
+)
 from .worker import (
     BriefingWorker, ConsolidationWorker, ObserverWorker, PlayWorker, SkillLearner,
     Worker,
@@ -516,6 +519,7 @@ class Bonsai(QWidget):
         self.face = None
         self._face_wired = False
         self._face_tick = 0
+        self._face_feeling = None
         self.observer_recent = []   # last few things it said, to avoid repeating itself
         self.observer_muted_until = 0.0
         self.briefing_worker = None
@@ -1934,6 +1938,7 @@ class Bonsai(QWidget):
             trace, unfinished, hit_step_limit = "", "", False
         self.messages.add_assistant(reply)
         self.speak(reply)
+        self.face_says(reply)
         if unfinished:
             # The strongest signal available: the app itself refused or failed the
             # change, and nothing since made it happen.
@@ -2296,7 +2301,8 @@ class Bonsai(QWidget):
         self.player = PlayWorker(dict(self.settings))
         self.player.comment.connect(
             lambda text: (self.messages.add_assistant(text, unprompted=True),
-                          self.speak(text, unprompted=True)))
+                          self.speak(text, unprompted=True),
+                          self.face_says(text)))
         self.player.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
         self.player.stopped.connect(self.on_play_stopped)
         self.player.failed.connect(self.on_play_stopped)
@@ -2349,11 +2355,36 @@ class Bonsai(QWidget):
             return
         self.face = AvatarWindow()
         self.face.avatar.refresh_mood()
+        # The panel is a second way into the same conversation, not a separate one.
+        self.face.sent.connect(self.send_from_avatar)
+        self.face.panel.interrupted.connect(self.on_stop_clicked)
+        self.face.panel.mic.setChecked(self.listen_box.isChecked())
+        self.face.panel.mic_toggled.connect(self.listen_box.setChecked)
         self.face.show()
         # Whatever is already speaking should move its mouth, so the signals are
         # hooked to the speaker rather than to the moment the window opened.
         if self.speaker is not None:
             self._wire_face()
+
+    def send_from_avatar(self, text):
+        """Typed into the avatar's own box: the same as typing into the main one."""
+        self.input.setPlainText(text)
+        self.send()
+
+    def face_says(self, text, state=None):
+        """Put a line under the avatar, say what it is doing, and wear what it felt."""
+        if self.face is None:
+            return
+        if text:
+            self.face.panel.say(text)
+            felt = emotion_face(text)
+            if felt:
+                # Held until the next line, rather than for a moment: a face that
+                # snaps back to neutral mid-sentence reads as a glitch.
+                self._face_feeling = felt
+                self.face.show_face(self.face.avatar.state, 0.0, feeling=felt)
+        if state:
+            self.face.panel.set_state(state)
 
     def _wire_face(self):
         """Point the speaker at the face, once, for whichever exists first."""
@@ -2368,18 +2399,21 @@ class Bonsai(QWidget):
             self.face.avatar.set_level(level)
             self._face_tick += 1
             self.face.show_face(self.face.avatar.state, level,
-                                self.face.avatar.blink, self._face_tick)
+                                self.face.avatar.blink, self._face_tick,
+                                feeling=self._face_feeling)
 
     def _face_talking(self, talking):
         if self.face is not None:
             self.face.avatar.set_state("talk" if talking else "idle")
             self.face.show_face(self.face.avatar.state, 0.0)
+            self.face_says("", "speaking" if talking else "idle")
 
     def face_state(self, state):
         """Called by the turn loop: thinking while it works, idle when it stops."""
         if self.face is not None and self.face.avatar.state != "talk":
             self.face.avatar.set_state(state)
             self.face.show_face(state, 0.0)
+            self.face_says("", "thinking" if state == "think" else "idle")
 
     def on_listen_toggled(self):
         if not self.listen_box.isChecked():
@@ -2422,6 +2456,7 @@ class Bonsai(QWidget):
 
     def on_heard(self, text):
         self.log(f"\U0001F3A4 heard: {text}")
+        self.face_says("", "heard you")
         if self.settings.get("listen_sends", False):
             self.input.setPlainText(text)
             self.send()
@@ -2454,7 +2489,8 @@ class Bonsai(QWidget):
         self.gamelink.acted.connect(lambda line: self.log(f"\U0001F3AE {line}"))
         self.gamelink.said.connect(
             lambda text: (self.messages.add_assistant(text, unprompted=True),
-                          self.speak(text, unprompted=True)))
+                          self.speak(text, unprompted=True),
+                          self.face_says(text)))
         self.gamelink.failed.connect(self.on_gamelink_failed)
         self.gamelink.start()
 
@@ -2488,6 +2524,7 @@ class Bonsai(QWidget):
     def on_observer_comment(self, text):
         self.messages.add_assistant(text, unprompted=True)
         self.speak(text, unprompted=True)
+        self.face_says(text)
         self.observer_recent = (self.observer_recent + [text])[-5:]
         self.observer_muted_until = time.time() + self.settings.get("proactive_cooldown", 600)
 

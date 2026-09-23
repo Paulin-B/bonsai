@@ -173,6 +173,8 @@ def speakable(text, limit=None):
         return ""
     limit = settings().get("max_spoken_chars", 600) if limit is None else limit
 
+    from .vrm import take_emotions
+    text, _ = take_emotions(text)      # "[happy]" is for the face, not for the ear
     blocks = len(FENCE_RE.findall(text))
     spoken = FENCE_RE.sub(" ", text)
     spoken = TABLE_RE.sub(" ", spoken)

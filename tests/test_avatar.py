@@ -120,7 +120,12 @@ window.resize(300, 380)
 window.show()
 for _ in range(4):
     app.processEvents()
-check("the face fills it", window.avatar.size(), window.size())
+# Not the whole window any more: the panel underneath takes its share.
+check("the face fills the width", window.avatar.width(), window.width())
+check("  ...and the panel has the rest",
+      window.avatar.height() + window.panel.height() <= window.height(), True)
+check("  ...with the face getting most of it",
+      window.avatar.height() > window.panel.height(), True)
 window.close()
 
 print("\n-- wired to the app, not to a demo --")
@@ -231,6 +236,79 @@ check("it will not shrink to nothing", window.wanted[0], 100)
 for _ in range(60): scroll(window, True)
 check("nor grow past the screen", window.wanted[0], 900)
 ga.save_settings(dict(ga.DEFAULTS))
+
+print("\n-- the panel under the face --")
+# Laid out the way Open-LLM-VTuber does it, because the arrangement is right: the
+# line it just said is what you look at, the state is one word, and the controls you
+# reach for while it is talking are stop and the mic.
+win = ga.AvatarWindow()
+check("there is a caption, hidden until there is something to caption",
+      win.panel.caption.isVisibleTo(win), False)
+win.panel.say("Right, that was never going to work.")
+check("a line shows", win.panel.caption.text(), "Right, that was never going to work.")
+check("  ...and the caption appears", win.panel.caption.isVisibleTo(win), True)
+win.panel.say("")
+check("an empty line hides it again", win.panel.caption.isVisibleTo(win), False)
+win.panel.say("word " * 200)
+check("a very long line is trimmed rather than filling the window",
+      len(win.panel.caption.text()) <= 240, True)
+check("  ...and says it was", win.panel.caption.text().endswith("..."), True)
+
+win.panel.say("[happy] That worked.")
+check("feeling tags are stage directions, not caption text",
+      win.panel.caption.text(), "That worked.")
+
+typed = []
+win.sent.connect(typed.append)
+win.panel.entry.setText("  start the server  ")
+win.panel._send()
+check("typing in the panel sends it", typed, ["start the server"])
+check("  ...and clears the box", win.panel.entry.text(), "")
+win.panel.entry.setText("   ")
+win.panel._send()
+check("whitespace sends nothing", typed, ["start the server"])
+
+stopped = []
+win.panel.interrupted.connect(lambda: stopped.append(1))
+win.panel.hush.click()
+check("there is a way to shut it up", stopped, [1])
+flips = []
+win.panel.mic_toggled.connect(flips.append)
+win.panel.mic.setChecked(True)
+check("and a mic that reports itself", flips, [True])
+win.panel.set_state("thinking")
+check("the state is one word", win.panel.state.text(), "thinking")
+
+print("\n-- dragging moves the window, typing does not --")
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtCore import QPointF, QEvent
+win.resize(300, 600)
+win.show()
+for _ in range(8): app.processEvents()
+def press(at):
+    win._drag = None
+    win.mousePressEvent(QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(*at), QPointF(*at),
+        ga.Qt.MouseButton.LeftButton, ga.Qt.MouseButton.LeftButton,
+        ga.Qt.KeyboardModifier.NoModifier))
+    return win._drag is not None
+press_face = press((150, 50))
+press_panel = press((150, win.panel.geometry().center().y()))
+check("pressing the face starts a drag", press_face, True)
+check("pressing the panel does not", press_panel, False)
+
+print("\n-- feelings a line asks for --")
+check("a tag is found", ga.emotion_face("[angry] no it did not"), "angry")
+check("the last one wins, since a line can turn",
+      ga.emotion_face("[angry] no - [happy] oh, actually yes"), "happy")
+check("words map onto what a model can do", ga.emotion_face("[sigh] fine"), "sad")
+check("an unknown one is not invented", ga.emotion_face("[bemused] hm"), None)
+check("no tag is no feeling", ga.emotion_face("just a sentence"), None)
+check("the tag never reaches the ear", "[happy]" in ga.speakable("[happy] done"), False)
+check("what it asked for beats the mood it was in",
+      ga.expression_weights("idle", 0.0, mood=-0.9, feeling="happy").get("happy"), 0.8)
+check("  ...and without one, the mood still shows",
+      "angry" in ga.expression_weights("idle", 0.0, mood=-0.9), True)
 
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

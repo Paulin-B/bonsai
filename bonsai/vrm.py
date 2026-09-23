@@ -11,6 +11,8 @@ Kept apart from any renderer on purpose. Deciding what the face should do is
 arithmetic over the mood and the sound, testable with no 3D at all; drawing it is
 somebody else's problem, and which somebody depends on what is installed.
 """
+import re
+
 from .store import load_mood
 
 # What a VRM 1.0 model promises. A model may provide more, and custom ones are common,
@@ -38,6 +40,37 @@ MOOD_FACES = (
 VISEMES = ("ih", "ee", "aa", "oh", "ou")
 
 
+# An emotion written into the reply, the way Open-LLM-VTuber does it: "[happy] that
+# worked" shows on the face and is not read out. The mood underneath is slow and
+# earned; this is the line-by-line layer on top of it, and it is the difference
+# between a face that reflects the afternoon and one that reacts to the sentence.
+EMOTION_TAG_RE = re.compile(r"\[(happy|sad|angry|relaxed|surprised|neutral|joy|sigh"
+                            r"|smug|thinking)\]", re.I)
+
+# The words it may write, mapped to what a model can actually do. Several point at
+# the same expression on purpose: a model is asked for feelings, not for the
+# vocabulary of a file format.
+EMOTION_FACES = {
+    "happy": "happy", "joy": "happy", "smug": "happy",
+    "sad": "sad", "sigh": "sad",
+    "angry": "angry", "relaxed": "relaxed", "surprised": "surprised",
+    "neutral": "neutral", "thinking": "relaxed",
+}
+
+
+def take_emotions(text):
+    """(text without the tags, the emotions it asked for, in order)."""
+    found = [m.group(1).lower() for m in EMOTION_TAG_RE.finditer(text or "")]
+    return EMOTION_TAG_RE.sub("", text or "").strip(), found
+
+
+def emotion_face(text):
+    """The expression a reply asked for, or None. The last one wins - a line that
+    starts cross and ends amused should end amused."""
+    _, found = take_emotions(text)
+    return EMOTION_FACES.get(found[-1]) if found else None
+
+
 def mood_face(value):
     for threshold, name in MOOD_FACES:
         if value >= threshold:
@@ -57,7 +90,7 @@ def viseme_for(level, tick=0):
     return VISEMES[tick % len(VISEMES)], min(1.0, 0.25 + level * 0.75)
 
 
-def expression_weights(state, level, blink=0.0, tick=0, mood=None):
+def expression_weights(state, level, blink=0.0, tick=0, mood=None, feeling=None):
     """Every expression that should be non-zero right now, as {name: 0..1}.
 
     One dictionary describing the whole face, so a renderer can set what changed and
@@ -65,11 +98,13 @@ def expression_weights(state, level, blink=0.0, tick=0, mood=None):
     value = load_mood()[0] if mood is None else mood
     weights = {}
 
-    face = mood_face(value)
+    # What the line asked for beats what the day has been like: the mood is slow and
+    # the sentence is now.
+    face = feeling or mood_face(value)
     if face != "neutral":
         # Never full strength: a model holding an expression at 1.0 looks like a mask,
         # and the mouth has to be legible through it.
-        weights[face] = min(0.85, 0.35 + abs(value) * 0.5)
+        weights[face] = 0.8 if feeling else min(0.85, 0.35 + abs(value) * 0.5)
 
     if state == "talk":
         name, weight = viseme_for(level, tick)

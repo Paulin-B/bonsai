@@ -19,9 +19,11 @@ import os
 import random
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer
+from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QToolButton, QVBoxLayout, QWidget,
+)
 
 from .store import load_mood, save_settings, settings
 
@@ -271,10 +273,94 @@ def float_it(width, height, x=None, y=None):
     return True
 
 
+class Panel(QFrame):
+    """The strip under the avatar: what it just said, what it is doing, and a way to
+    answer without going back to the main window.
+
+    Modelled on how Open-LLM-VTuber presents one of these, because the arrangement is
+    right: the line it just said is the thing you look at, the state is one word, and
+    the controls you actually reach for while it is talking are stop and the mic."""
+
+    sent = pyqtSignal(str)
+    interrupted = pyqtSignal()
+    mic_toggled = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("avatarPanel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(8)
+
+        self.caption = QLabel("")
+        self.caption.setObjectName("avatarCaption")
+        self.caption.setWordWrap(True)
+        self.caption.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.caption.hide()          # nothing said yet is nothing to show
+        layout.addWidget(self.caption)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.state = QLabel("idle")
+        self.state.setObjectName("avatarState")
+        row.addWidget(self.state)
+        row.addStretch(1)
+
+        self.mic = QToolButton()
+        self.mic.setObjectName("avatarControl")
+        self.mic.setCheckable(True)
+        self.mic.setText("\U0001F3A4")
+        self.mic.setToolTip("Listen")
+        self.mic.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mic.toggled.connect(self.mic_toggled)
+        row.addWidget(self.mic)
+
+        self.hush = QToolButton()
+        self.hush.setObjectName("avatarControl")
+        self.hush.setText("\u270B")
+        self.hush.setToolTip("Stop talking")
+        self.hush.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hush.clicked.connect(self.interrupted)
+        row.addWidget(self.hush)
+        layout.addLayout(row)
+
+        self.entry = QLineEdit()
+        self.entry.setObjectName("avatarEntry")
+        self.entry.setPlaceholderText("Type your message...")
+        self.entry.returnPressed.connect(self._send)
+        layout.addWidget(self.entry)
+
+    def _send(self):
+        said = self.entry.text().strip()
+        if said:
+            self.entry.clear()
+            self.sent.emit(said)
+
+    def say(self, text):
+        """Show a line, trimmed to something readable at this size.
+
+        The feeling tags come out here as well as out of the speech: they are stage
+        directions for the face, and leaving them in the caption is showing someone
+        the markup."""
+        from .vrm import take_emotions
+        text, _ = take_emotions(text or "")
+        text = " ".join(text.split())
+        if not text:
+            self.caption.hide()
+            return
+        self.caption.setText(text if len(text) <= 240 else text[:237] + "...")
+        self.caption.show()
+
+    def set_state(self, word):
+        self.state.setText(word)
+
+
 class AvatarWindow(QWidget):
     """A small frameless window to put in a corner and point OBS at.
 
     Transparent, always on top, and dragged by its face since it has no title bar."""
+
+    sent = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(None)
@@ -292,9 +378,14 @@ class AvatarWindow(QWidget):
         # imported at the top, so a machine with no web engine never loads one.
         from .vrmview import VrmView
         self.model = VrmView.build(self)
-        layout.addWidget(self.model if self.model is not None else self.avatar)
+        face = self.model if self.model is not None else self.avatar
+        layout.addWidget(face, stretch=1)
         if self.model is not None:
             self.avatar.hide()
+
+        self.panel = Panel(self)
+        self.panel.sent.connect(self.sent)
+        layout.addWidget(self.panel)
         config = settings()
         # The size that is wanted, kept separately from the size it currently has:
         # by the time the compositor can be told anything, it has already tiled the
@@ -333,17 +424,21 @@ class AvatarWindow(QWidget):
         self.remember()
         super().closeEvent(event)
 
-    def show_face(self, state, level, blink=0.0, tick=0):
+    def show_face(self, state, level, blink=0.0, tick=0, feeling=None):
         """Whatever is drawing the face, tell it what the face is doing."""
         if self.model is None:
             return False
         from .vrm import expression_weights
         from .vrmview import VrmView
-        VrmView.apply(self.model, expression_weights(state, level, blink, tick))
+        VrmView.apply(self.model,
+                      expression_weights(state, level, blink, tick, feeling=feeling))
         return True
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        # Only from the face. Dragging from the panel would move the window every
+        # time you went to click in the text box.
+        if (event.button() == Qt.MouseButton.LeftButton
+                and not self.panel.geometry().contains(event.position().toPoint())):
             self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
