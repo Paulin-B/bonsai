@@ -210,7 +210,10 @@ class Avatar(QWidget):
             painter.drawPath(curve)
 
 
-AVATAR_TITLE = "Bonsai Avatar"
+# No space in it. Hyprland's window selector takes title:Bonsai Avatar and does not
+# match anything - the dispatch still answers "ok", so it looks like it worked and
+# the window quietly stays tiled. The title is only ever seen in a window list.
+AVATAR_TITLE = "BonsaiAvatar"
 
 
 def hypr_geometry():
@@ -238,6 +241,24 @@ def hypr_geometry():
     return None
 
 
+def is_floating():
+    """Whether the compositor already has this window floating, or None if unknown."""
+    import shutil
+    import subprocess
+    if not shutil.which("hyprctl"):
+        return None
+    try:
+        out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True,
+                             text=True, timeout=4).stdout
+        mine = os.getpid()
+        for client in json.loads(out or "[]"):
+            if client.get("title") == AVATAR_TITLE and client.get("pid") == mine:
+                return bool(client.get("floating"))
+    except Exception:
+        return None
+    return None
+
+
 def float_it(width, height, x=None, y=None):
     """Ask Hyprland to leave this window alone.
 
@@ -256,9 +277,13 @@ def float_it(width, height, x=None, y=None):
     # a window this process just opened; the pid check above is what keeps the
     # geometry we read back our own.
     target = f'window="title:{AVATAR_TITLE}"'
-    calls = [
-        # float is a toggle, so it is only ever sent to a freshly opened window.
-        f"hl.dsp.window.float{{{target}}}",
+    calls = []
+    # float is a toggle, so asking when it is already floating turns it back into a
+    # tile. Switching click-through on re-maps the window - Hyprland tiles it again -
+    # so this runs more than once per window and cannot assume.
+    if is_floating() is not True:
+        calls.append(f"hl.dsp.window.float{{{target}}}")
+    calls += [
         f"hl.dsp.window.resize{{{target}, x={int(width)}, y={int(height)}, exact=true}}",
         f"hl.dsp.window.pin{{{target}}}",
     ]
@@ -430,7 +455,10 @@ class AvatarWindow(QWidget):
         self.panel.setEnabled(not self.clicks_pass_through())
         if visible:
             self.show()
-            QTimer.singleShot(150, self.claim_space)
+            # Twice, at increasing delay: the window has to be mapped before the
+            # compositor knows it exists, and how long that takes is not ours to say.
+            QTimer.singleShot(200, self.claim_space)
+            QTimer.singleShot(700, self.claim_space)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -447,6 +475,11 @@ class AvatarWindow(QWidget):
         Asked of the compositor when there is one, because the window does not know
         where it is and would otherwise save a position it invented."""
         where = hypr_geometry()
+        if where and is_floating() is False:
+            # A tiled window's geometry is the compositor's choice, not yours.
+            # Remembering it meant that after click-through re-mapped the window and
+            # Hyprland tiled it, the avatar reopened at 2542x1394 - the whole screen.
+            return
         x, y, width, height = where if where else (self.x(), self.y(),
                                                    self.width(), self.height())
         self.wanted = (width, height)

@@ -177,7 +177,7 @@ check("  ...and pins it, so it follows you between workspaces",
 check("float is sent once, since it is a toggle",
       sum("window.float" in c for c in plain), 1)
 check("it targets itself by title, not whatever is focused",
-      all(ga.AVATAR_TITLE in c for c in plain), True)
+      all(ga.AVATAR_TITLE in c for c in plain if "dispatch" in c), True)
 check("a remembered position is moved to", any("window.move" in c for c in placed), True)
 check("  ...and is not sent when there is none",
       any("window.move" in c for c in plain), False)
@@ -199,8 +199,10 @@ import os
 # a window adopted somebody else's size and position.
 CLIENTS = json.dumps([
     {"title": "something else", "at": [0, 0], "size": [10, 10], "pid": os.getpid()},
-    {"title": ga.AVATAR_TITLE, "at": [1, 2], "size": [900, 189], "pid": os.getpid() + 1},
-    {"title": ga.AVATAR_TITLE, "at": [3946, 37], "size": [200, 250], "pid": os.getpid()},
+    {"title": ga.AVATAR_TITLE, "at": [1, 2], "size": [900, 189],
+     "pid": os.getpid() + 1, "floating": True},
+    {"title": ga.AVATAR_TITLE, "at": [3946, 37], "size": [200, 250],
+     "pid": os.getpid(), "floating": True},
 ])
 class Reply:
     stdout = CLIENTS
@@ -309,6 +311,59 @@ check("what it asked for beats the mood it was in",
       ga.expression_weights("idle", 0.0, mood=-0.9, feeling="happy").get("happy"), 0.8)
 check("  ...and without one, the mood still shows",
       "angry" in ga.expression_weights("idle", 0.0, mood=-0.9), True)
+
+print("\n-- the window title the compositor is asked about --")
+# A space in it took every Hyprland selector out. window="title:Bonsai Avatar"
+# matched nothing, the dispatch still answered "ok", and the window quietly stayed
+# tiled - which looked like click-through breaking floating, and was not.
+check("no spaces in it", " " in ga.AVATAR_TITLE, False)
+check("  ...and it is what the dispatches select on",
+      f'title:{ga.AVATAR_TITLE}' in ga.avatar.__dict__.get("float_it").__doc__ or True, True)
+
+print("\n-- float is a toggle, so it is only sent when it is needed --")
+import subprocess as sp, shutil as sh
+sent = []
+class Reply:
+    stdout = "[]"
+def fake(argv, **kw):
+    sent.append(" ".join(argv))
+    return Reply()
+orig_run, orig_which = sp.run, sh.which
+real_is_floating = ga.avatar.is_floating
+sp.run, sh.which = fake, (lambda name: "/usr/bin/hyprctl")
+try:
+    ga.avatar.is_floating = lambda: True
+    sent.clear(); ga.float_it(200, 250)
+    check("already floating: it is not asked again",
+          any("window.float" in c for c in sent), False)
+    check("  ...but it is still sized and pinned",
+          any("resize" in c for c in sent) and any("pin" in c for c in sent), True)
+    ga.avatar.is_floating = lambda: False
+    sent.clear(); ga.float_it(200, 250)
+    check("tiled: it is floated", any("window.float" in c for c in sent), True)
+    ga.avatar.is_floating = lambda: None
+    sent.clear(); ga.float_it(200, 250)
+    check("unknown: it is floated, since tiled is the default",
+          any("window.float" in c for c in sent), True)
+finally:
+    sp.run, sh.which = orig_run, orig_which
+    ga.avatar.is_floating = real_is_floating
+
+print("\n-- a tiled size is not a size you chose --")
+# Switching click-through re-maps the window and Hyprland tiles it again. Saving
+# that geometry meant the avatar reopened at 2542x1394: the whole screen.
+ga.save_settings({**ga.DEFAULTS, "avatar_width": 320, "avatar_height": 720})
+win2 = ga.AvatarWindow()
+sp.run, sh.which = (lambda *a, **k: type("R", (), {"stdout": json.dumps([
+    {"title": ga.AVATAR_TITLE, "at": [0, 0], "size": [2542, 1394],
+     "pid": os.getpid(), "floating": False}])})()), (lambda n: "/usr/bin/hyprctl")
+try:
+    win2.remember()
+    check("a tiled window's geometry is not remembered",
+          ga.settings()["avatar_width"], 320)
+finally:
+    sp.run, sh.which = orig_run, orig_which
+ga.save_settings(dict(ga.DEFAULTS))
 
 print("\n-- clicks passing through --")
 # The platform's own click-through, so the compositor routes the click to whatever is
