@@ -200,18 +200,35 @@ window.loadModel = (url) => {
 const relax = () => {
   const bones = vrm && vrm.humanoid;
   if (!bones) return;
-  const pose = {
-    // Negative brings the left arm down; positive raised it over her head, which is
-    // a cheerful pose but not a resting one.
-    leftUpperArm: [0, 0, -1.22], rightUpperArm: [0, 0, 1.22],
-    leftLowerArm: [0, -0.18, -0.12], rightLowerArm: [0, 0.18, 0.12],
+
+  const put = (sign) => {
+    const pose = {
+      leftUpperArm: [0, 0, -1.22 * sign], rightUpperArm: [0, 0, 1.22 * sign],
+      leftLowerArm: [0, -0.18 * sign, -0.12 * sign],
+      rightLowerArm: [0, 0.18 * sign, 0.12 * sign],
+    };
+    for (const [name, [x, y, z]] of Object.entries(pose)) {
+      const node = bones.getNormalizedBoneNode(name);
+      if (node) node.rotation.set(x, y, z);
+    }
+    if (bones.update) bones.update();
+    vrm.scene.updateMatrixWorld(true);
   };
-  for (const [name, [x, y, z]] of Object.entries(pose)) {
-    const node = bones.getNormalizedBoneNode(name);
-    if (node) node.rotation.set(x, y, z);
-  }
-  if (vrm.humanoid.update) vrm.humanoid.update();
-  vrm.scene.updateMatrixWorld(true);
+
+  const handAboveShoulder = () => {
+    const hand = bones.getNormalizedBoneNode('leftHand');
+    const shoulder = bones.getNormalizedBoneNode('leftUpperArm');
+    if (!hand || !shoulder) return false;
+    return hand.getWorldPosition(new THREE.Vector3()).y >
+           shoulder.getWorldPosition(new THREE.Vector3()).y;
+  };
+
+  // Which way "down" is depends on the model. A VRM 0.x rig came out with both arms
+  // raised over her head from the rotation that lowers them on a 1.0 one, so the
+  // result is measured rather than assumed: if the hand ends up above the shoulder,
+  // that was the wrong way round.
+  put(1);
+  if (handAboveShoulder()) put(-1);
 };
 
 let framing = 'full';
@@ -248,9 +265,44 @@ const frame = (ratio) => {
   camera.updateProjectionMatrix();
 };
 
-window.setExpressions = (weights) => { wanted = weights || {}; };
+// Gaze goes through lookAt, not through an expression. VRM 1.0 offers lookUp as a
+// preset and 0.x does not - it has a lookAt system instead - so driving the preset
+// meant thinking did nothing at all on a 0.x model, silently, which is the exact
+// failure the expression names were chosen to avoid.
+const gazeTarget = new THREE.Object3D();
+scene.add(gazeTarget);
+
+const gaze = (up) => {
+  if (!vrm || !vrm.lookAt) return;
+  vrm.lookAt.target = gazeTarget;
+  const head = vrm.humanoid && vrm.humanoid.getNormalizedBoneNode('head');
+  const at = head ? head.getWorldPosition(new THREE.Vector3())
+                  : new THREE.Vector3(0, 1.4, 0);
+  gazeTarget.position.set(at.x, at.y + (up ? 0.45 : 0), at.z + 1.0);
+};
+
+let warned = false;
+window.setExpressions = (weights) => {
+  wanted = weights || {};
+  gaze(!!wanted.lookUp);
+  if (!warned && vrm && vrm.expressionManager) {
+    const has = vrm.expressionManager.expressionMap;
+    // Said once, not every frame. A name this model does not have is worth knowing
+    // about; sixty lines a second about it is not.
+    const absent = Object.keys(wanted).filter((n) => !(n in has) && n !== 'lookUp');
+    if (absent.length) {
+      warned = true;
+      console.log('VRM_MISSING ' + absent.join(','));
+    }
+  }
+};
 // Re-framed on demand, since resizing the window changes what fits.
 window.reframe = () => frame();
+// What this model actually provides, in full. The console line that reports it on
+// load gets truncated by whatever is reading the log, and a half-seen list is how
+// you conclude an expression is missing when it is not.
+window.vrmExpressions = () => (vrm && vrm.expressionManager)
+  ? Object.keys(vrm.expressionManager.expressionMap).sort().join(' ') : 'none';
 
 // One frame's worth of work, kept out of the animation loop so that a snapshot can
 // do it too. requestAnimationFrame does not fire for a page that is not on screen,

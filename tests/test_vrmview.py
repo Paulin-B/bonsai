@@ -64,6 +64,17 @@ check("  ...and the snapshot does it before reading pixels",
 check("the snapshot takes a size, since an unlaid-out page reports none",
       "window.snapshot = (w, h)" in page, True)
 
+print("\n-- models older than the spec this was written against --")
+# A VRM 0.x file names its expressions a/i/u/e/o and joy/sorrow/fun. three-vrm
+# normalises those to the 1.0 vocabulary, so the names here reach both - except
+# lookUp, which 0.x does not have as an expression at all.
+check("gaze goes through lookAt, which both versions have",
+      "vrm.lookAt.target" in page, True)
+check("  ...so thinking is not silently nothing on an older model",
+      "gaze(!!wanted.lookUp)" in page, True)
+check("and a name the model really lacks is reported", "VRM_MISSING" in page, True)
+check("  ...once, not sixty times a second", "if (!warned" in page, True)
+
 print("\n-- expressions are cleared, not just set --")
 check("every expression is written every frame",
       "manager.setValue(name, wanted[name] || 0)" in page, True)
@@ -123,8 +134,10 @@ check("  ...fitting the height, so a tall window is filled rather than padded",
       "forHeight * 1.06" in whole and "Math.max(forHeight, forWidth)" not in whole, True)
 check("the T-pose is replaced with something a person would stand in",
       "const relax" in whole, True)
-check("  ...by rotating the arms down, not up",
-      "leftUpperArm: [0, 0, -1.22]" in whole, True)
+check("  ...measuring which way down is rather than assuming",
+      "handAboveShoulder" in whole, True)
+check("  ...because a 0.x rig raises the arms with a 1.0 rig's rotation",
+      "put(1);" in whole and "if (handAboveShoulder()) put(-1);" in whole, True)
 check("  ...and the framing happens after, since the pose changes the silhouette",
       whole.index("relax();") < whole.index("frame();"), True)
 check("head framing finds the head bone rather than a fraction of the height",

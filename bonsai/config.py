@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-22-pose"
+APP_VERSION = "2026-09-23-vrm0"
 
 
 # Where the repo lives, for the optional files that ship beside it.
