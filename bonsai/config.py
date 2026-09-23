@@ -27,7 +27,7 @@ except ImportError:
     yaml = None
 
 
-APP_VERSION = "2026-09-23-vtuber"
+APP_VERSION = "2026-09-23-clickthrough"
 
 
 # Where the repo lives, for the optional files that ship beside it.
@@ -207,6 +207,7 @@ DEFAULTS = {
     "vrm_framing": "full",         # "full" shows all of it, "head" is head and shoulders
     "vrm_use_gpu": False,          # off: GPU compositing corrupts the display here
     "avatar_folder": "",           # blank uses ~/.local/share/bonsai_avatar
+    "avatar_click_through": False,  # on: clicks land on what is behind it instead
     "avatar_x": -1,                # where you last dragged it; -1 means wherever
     "avatar_y": -1,
     "avatar_width": 200,

@@ -1679,6 +1679,12 @@ class Bonsai(QWidget):
             self.apply_theme()
             self.restyle_open_views()
             self.refresh_models()
+            if self.face is not None:
+                # Click-through and framing are both window-level, so an open avatar
+                # has to be told rather than waiting to be reopened.
+                self.face.apply_click_through()
+                if self.face.model is not None:
+                    self.face.model.page().runJavaScript("window.reframe && reframe()")
             self.log("\u2699 Settings updated.")
             now = self.settings.get("services", {})
             self.stop_services([name for name, on in was_running.items()

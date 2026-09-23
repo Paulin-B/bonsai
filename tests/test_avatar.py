@@ -310,5 +310,45 @@ check("what it asked for beats the mood it was in",
 check("  ...and without one, the mood still shows",
       "angry" in ga.expression_weights("idle", 0.0, mood=-0.9), True)
 
+print("\n-- clicks passing through --")
+# The platform's own click-through, so the compositor routes the click to whatever is
+# behind rather than to a window that then ignores it. There is no masking a hole in
+# the middle: a mask clips what is drawn as well as what is clicked, so masking to
+# the panel would leave a panel and no avatar.
+ga.save_settings(dict(ga.DEFAULTS))
+solid = ga.AvatarWindow()
+check("off by default", solid.clicks_pass_through(), False)
+check("  ...so the panel works", solid.panel.isEnabled(), True)
+
+ga.save_settings({**ga.DEFAULTS, "avatar_click_through": True})
+ghost = ga.AvatarWindow()
+check("turned on, the window is transparent to input", ghost.clicks_pass_through(), True)
+check("  ...and it says so by disabling the panel", ghost.panel.isEnabled(), False)
+check("it is still frameless and on top",
+      bool(ghost.windowFlags() & ga.Qt.WindowType.FramelessWindowHint)
+      and bool(ghost.windowFlags() & ga.Qt.WindowType.WindowStaysOnTopHint), True)
+
+print("\n-- and it can be changed without reopening --")
+ga.save_settings(dict(ga.DEFAULTS))
+ghost.apply_click_through()
+check("turning it off restores the panel", ghost.panel.isEnabled(), True)
+check("  ...and the flag", ghost.clicks_pass_through(), False)
+before = ghost.windowFlags()
+ghost.apply_click_through()
+check("applying the same setting twice changes nothing",
+      ghost.windowFlags(), before)
+ga.save_settings(dict(ga.DEFAULTS))
+
+print("\n-- the panel does not cost the full body --")
+window = ga.AvatarWindow()
+window.resize(300, 380)
+window.show()
+for _ in range(8): app.processEvents()
+face = window.model if window.model is not None else window.avatar
+check("the face still gets most of a short window",
+      face.height() > window.height() * 0.6, True)
+check("  ...and all of the width", face.width(), window.width())
+window.close()
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)

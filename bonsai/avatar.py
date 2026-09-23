@@ -365,9 +365,7 @@ class AvatarWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(None)
         self.setWindowTitle(AVATAR_TITLE)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
-                            | Qt.WindowType.WindowStaysOnTopHint
-                            | Qt.WindowType.Tool)
+        self.setWindowFlags(self.wanted_flags())
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # A layout rather than a resizeEvent: resizing a window that has not been
         # shown does not deliver one, and the face stayed at its minimum size.
@@ -385,6 +383,7 @@ class AvatarWindow(QWidget):
 
         self.panel = Panel(self)
         self.panel.sent.connect(self.sent)
+        self.panel.setEnabled(not self.clicks_pass_through())
         layout.addWidget(self.panel)
         config = settings()
         # The size that is wanted, kept separately from the size it currently has:
@@ -395,6 +394,43 @@ class AvatarWindow(QWidget):
         self.placed = (config.get("avatar_x", -1), config.get("avatar_y", -1))
         self.resize(*self.wanted)
         self._drag = None
+
+    @staticmethod
+    def wanted_flags():
+        """Frameless, on top, and out of the way of the mouse when asked.
+
+        WindowTransparentForInput is the platform's own idea of click-through - on
+        Wayland it becomes an empty input region, so the compositor routes clicks to
+        whatever is behind rather than to a window that then has to ignore them.
+
+        It applies to the whole window, panel included. There is no masking a hole in
+        the middle: a mask clips what is drawn as well as what is clicked, so masking
+        to the panel would leave a panel and no avatar. So this is a mode - look at
+        it, do not touch it - and the way out of it is the toggle that opened it."""
+        flags = (Qt.WindowType.FramelessWindowHint
+                 | Qt.WindowType.WindowStaysOnTopHint
+                 | Qt.WindowType.Tool)
+        if settings().get("avatar_click_through", False):
+            flags |= Qt.WindowType.WindowTransparentForInput
+        return flags
+
+    def clicks_pass_through(self):
+        return bool(self.windowFlags() & Qt.WindowType.WindowTransparentForInput)
+
+    def apply_click_through(self):
+        """Re-apply the setting to a window that is already open.
+
+        Changing flags un-maps and re-maps the window, which loses the floating and
+        pinned state Hyprland was told about - so it is told again."""
+        wanted = self.wanted_flags()
+        if wanted == self.windowFlags():
+            return
+        visible = self.isVisible()
+        self.setWindowFlags(wanted)
+        self.panel.setEnabled(not self.clicks_pass_through())
+        if visible:
+            self.show()
+            QTimer.singleShot(150, self.claim_space)
 
     def showEvent(self, event):
         super().showEvent(event)

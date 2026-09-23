@@ -730,6 +730,11 @@ class SettingsDialog(QDialog):
                   "A 3D avatar, used instead of the drawn face. Its expressions follow "
                   "the mood and the mouth follows what is being said. The renderer is "
                   "downloaded once, the first time one is set.")
+        self.check("Voice", "avatar_click_through", "Let clicks pass through the avatar",
+                   "For leaving it on screen while you work: the window stops taking "
+                   "the mouse at all, so clicks land on whatever is behind it. Its own "
+                   "text box and buttons stop working too - there is no masking a hole "
+                   "in the middle of a window - so turn it off to type to it there.")
         self.choice("Voice", "vrm_framing", "Show:",
                     ["The whole model", "Head and shoulders"],
                     values={"The whole model": "full", "Head and shoulders": "head"})
