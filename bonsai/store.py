@@ -603,6 +603,24 @@ def available_models(server_url, timeout=4):
     return found
 
 
+def match_model(query, labels):
+    """Pick one of `labels` by what someone typed: (index, []) for a single match,
+    (None, [indexes]) when it is ambiguous or absent. Exact beats substring, so
+    'Qwen' does not lose to 'Qwen 7B' and 'Qwen 30B' when an entry is called Qwen."""
+    wanted = (query or "").strip().lower()
+    if not wanted:
+        return None, list(range(len(labels)))
+    lowered = [label.lower() for label in labels]
+    exact = [i for i, label in enumerate(lowered) if label == wanted
+             or label.rsplit("\u00b7", 1)[-1].strip() == wanted]
+    if len(exact) == 1:
+        return exact[0], []
+    partial = [i for i, label in enumerate(lowered) if wanted in label]
+    if len(partial) == 1:
+        return partial[0], []
+    return None, partial
+
+
 def load_skills():
     return load_json(SKILLS_FILE, {"skills": []})
 

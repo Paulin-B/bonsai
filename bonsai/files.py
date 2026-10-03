@@ -366,6 +366,16 @@ def read_file(raw, numbered=True):
     return "\n".join(out) + note
 
 
+def _size_note(path):
+    """' (N bytes)' for a file, '' for a directory. A dangling symlink or a socket that
+    vanished between listing and stat is common in /tmp (Steam leaves both), and one
+    of them used to crash the whole turn."""
+    try:
+        return "" if path.is_dir() else f" ({path.stat().st_size} bytes)"
+    except OSError:
+        return " (broken link)"
+
+
 def list_directory(raw, limit=200):
     """Lists a folder and one level inside each subfolder. A flat listing made the
     model conclude a file was missing when it was one directory down."""
@@ -399,13 +409,12 @@ def list_directory(raw, limit=200):
                 if shown >= limit:
                     break
                 mark = "/" if child.is_dir() else ""
-                size = "" if child.is_dir() else f" ({child.stat().st_size} bytes)"
-                lines.append(f"         {entry.name}/{child.name}{mark}{size}")
+                lines.append(f"         {entry.name}/{child.name}{mark}{_size_note(child)}")
                 shown += 1
             if len(children) > 20:
                 lines.append(f"         ...[{len(children) - 20} more in {entry.name}/]")
         else:
-            lines.append(f"[FILE] {entry.name} ({entry.stat().st_size} bytes)")
+            lines.append(f"[FILE] {entry.name}{_size_note(entry)}")
             shown += 1
 
     out = f"Contents of {path} (one level deep):\n" + "\n".join(lines)
