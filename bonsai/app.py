@@ -21,7 +21,7 @@ from .config import (
     APP_VERSION, DEFAULTS, DOCKER_SERVICES, MEMORY_FILE, PROTECTED_PATHS, SKILLS_FILE,
 )
 from .store import (
-    available_models, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_mood, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
+    available_models, match_model, briefing_is_stale, compose_for, compose_services, endpoints, expand_skill_shortcut, load_briefing, load_character, load_interests, load_memory, load_mood, load_skills, load_trusted, looks_english, memory_to_text, project_note_path, project_summary, read_project_note, save_interests, save_json, save_project_note, save_settings, save_trusted, search_backend_up, settings, suggested_interests, text_to_memory,
 )
 from .text import (
     ACTIONS_ECHO_RE, CLAIMED_ACTION_RE, CLAIMED_TASK_RE, DENIES_TOOL_RE, RECORD_HEADER, TASK_MUTATION_RE, invented_files, invented_recall, is_record_echo, narrate_trace, plain_text, same_as_last_time, unsearched_memory, unverified_files,
@@ -1489,6 +1489,23 @@ class Bonsai(QWidget):
                      "can still pick another server.", None if offered else "orange")
         return offered
 
+    def model_command(self, query):
+        """/model lists what can be picked; /model <part of a name> switches to it.
+        The same switch the header picker makes, for a hand that is on the keyboard."""
+        labels = [self.model_picker.itemText(i) for i in range(self.model_picker.count())]
+        index, candidates = match_model(query, labels)
+        if index is not None:
+            self.model_picker.setCurrentIndex(index)
+            self.on_model_chosen(index)
+            return
+        listing = "<br>".join(f"\u2022 {labels[i]}" for i in candidates) or "(nothing)"
+        if query and not candidates:
+            self.log(f"Nothing matches '{query}'. Available:<br>"
+                     + "<br>".join(f"\u2022 {l}" for l in labels), "orange")
+        else:
+            self.log(("More than one matches '" + query + "'. " if query else
+                      "Pick one with /model &lt;name&gt;. ") + "<br>" + listing)
+
     def on_model_chosen(self, index):
         url, name = self.model_picker.itemData(index) or ("", "")
         if not url:
@@ -1797,6 +1814,10 @@ class Bonsai(QWidget):
         prompt = self.input.text().strip()
         if not prompt:
             return  # empty input shouldn't invent a question
+        if prompt == "/model" or prompt.startswith("/model "):
+            self.input.clear()
+            self.model_command(prompt[len("/model"):].strip())
+            return
         if self.auto_running:
             self.stop_auto("you sent a message")  # your input always takes precedence
         self.continuations = 0

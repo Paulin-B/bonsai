@@ -453,6 +453,17 @@ class Worker(QThread):
         self.status.emit(f"Opening: {' '.join(argv)[:50]}")
         return start_program(argv)
 
+    def log_tool(self, name, argument, result, limit=2000):
+        """Put what a tool returned beside what the model asked for. The log used to
+        hold only the asks, so a run of identical LIST_DIR calls could not be told
+        apart from a model that never got an answer."""
+        if not self.config.get("log_tool_results", True):
+            return
+        text = str(result)
+        if len(text) > limit:
+            text = text[:limit] + f"\n...[{len(text) - limit} more characters not logged]"
+        debug_note("TOOL", f"{name}: {str(argument)[:500]!r}\n-> {text}")
+
     def run_tool(self, name, argument):
         if name == "__UNKNOWN__":
             skills = ", ".join(sorted(all_skills())) or "none"
@@ -756,6 +767,7 @@ class Worker(QThread):
                               "blocking you.]")
                 else:
                     result = self.run_tool(name, argument)
+                    self.log_tool(name, argument, result)
                     if repeats:
                         result += ("\n\n[You already made this exact call this turn and got "
                                    "the same result. Repeating it will not change anything. "

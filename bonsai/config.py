@@ -148,6 +148,7 @@ DEFAULTS = {
     "max_continuations": 3,        # times a turn may resume itself after running out
     "request_timeout": 600,        # must outlast max_tokens at ~38 tok/s, plus prefill
     "enable_thinking": False,      # Gemma 4 reasoning traces eat the token budget
+    "log_tool_results": True,      # record what each tool returned in the debug log
     "native_tools": True,          # use llama.cpp schema-validated tool calling
     # Which compose services to start. An idle container still holds RAM, and a second
     # model server holds VRAM, so anything unused stays stopped.
