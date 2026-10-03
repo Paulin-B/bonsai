@@ -618,8 +618,34 @@ def invented_files(reply, trace, least=2):
     return missing if len(missing) >= least else []
 
 
+THINK_BLOCK_RE = re.compile(r"<(think|thinking|reasoning)>(.*?)</\1>", re.I | re.S)
+
+
+def split_reasoning(text):
+    """Return (reasoning, answer) for a reply that may carry its own thinking inline.
+
+    Unsloth, llama.cpp without --reasoning-format, and most Qwen/DeepSeek templates put
+    the trace in the content between <think> tags rather than in a separate field. Left
+    in, it is read as the answer - and a trace that says "I should call [TOOL: ...]"
+    would be executed as though the model had. Three shapes occur: a closed block, an
+    unclosed one (the reply was cut off while still thinking, so there is no answer),
+    and a lone closing tag (the template already opened the block in the prompt)."""
+    text = text or ""
+    found = [m.group(2).strip() for m in THINK_BLOCK_RE.finditer(text)]
+    text = THINK_BLOCK_RE.sub("", text)
+    opened = re.search(r"<(think|thinking|reasoning)>", text, re.I)
+    if opened:
+        found.append(text[opened.end():].strip())
+        text = text[:opened.start()]
+    closed = re.search(r"</(think|thinking|reasoning)>", text, re.I)
+    if closed:
+        found.append(text[:closed.start()].strip())
+        text = text[closed.end():]
+    return "\n\n".join(f for f in found if f), text.strip() if found else text
+
+
 def denoise(text):
-    return NOISE_RE.sub("\n", text)
+    return NOISE_RE.sub("\n", split_reasoning(text)[1])
 
 
 def extract_tool_call(text):
@@ -798,3 +824,56 @@ def split_file_op(raw):
     else:
         second = rest.strip()
     return action, first, second
+
+
+class ThinkSplitter:
+    """Separate <think> spans from the answer in a stream, whatever the chunk boundaries.
+
+    A tag can arrive split across chunks ("<thi" then "nk>"), so anything that might
+    still turn into a tag is held back until the next piece settles it. feed() returns
+    (answer, reasoning) for that piece."""
+    OPEN = re.compile(r"<(think|thinking|reasoning)>", re.I)
+    CLOSE = re.compile(r"</(think|thinking|reasoning)>", re.I)
+
+    def __init__(self):
+        self.buffer = ""
+        self.inside = False
+        self.started = False
+
+    def _held(self):
+        """Length of a trailing fragment that could still become a tag."""
+        cut = self.buffer.rfind("<")
+        if cut != -1 and len(self.buffer) - cut < 12 and ">" not in self.buffer[cut:]:
+            return len(self.buffer) - cut
+        return 0
+
+    def feed(self, piece):
+        self.buffer += piece
+        answer, thought = [], []
+        while True:
+            pattern = self.CLOSE if self.inside else self.OPEN
+            match = pattern.search(self.buffer)
+            if match:
+                (thought if self.inside else answer).append(self.buffer[:match.start()])
+                self.buffer = self.buffer[match.end():]
+                self.inside = not self.inside
+                self.started = True
+                continue
+            # A lone closing tag before any opener means the template opened the block
+            # in the prompt, so everything so far was reasoning.
+            if not self.inside and not self.started:
+                closer = self.CLOSE.search(self.buffer)
+                if closer:
+                    thought.append(self.buffer[:closer.start()])
+                    self.buffer = self.buffer[closer.end():]
+                    self.started = True
+                    continue
+            keep = self._held()
+            ready, self.buffer = self.buffer[:len(self.buffer) - keep], self.buffer[len(self.buffer) - keep:]
+            (thought if self.inside else answer).append(ready)
+            return "".join(answer), "".join(thought)
+
+    def flush(self):
+        """Whatever is still held at the end of the stream; reasoning is not answer."""
+        rest, self.buffer = self.buffer, ""
+        return "" if self.inside else rest

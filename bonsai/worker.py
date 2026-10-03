@@ -18,7 +18,7 @@ from .store import (
     all_skills, character_voice, fetch_briefing, load_character, load_memory, load_screen_log, load_trusted, MOOD_STEPS, mood_line, mood_reason, record_project_file, record_screen, save_json, save_vault_note, search_memory, search_vault, shift_mood, skills_matching, unreachable_server,
 )
 from .text import (
-    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, UNCHECKED_CLAIM_RE, already_believes, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
+    DENIES_TOOL_RE, MAX_CONSECUTIVE_REFUSALS, UNCHECKED_CLAIM_RE, already_believes, MAX_IDENTICAL_CALLS, MUTATING_TOOLS, awaits_an_answer, blocked_as_repeat, collapse_repetition, denoise, extract_tool_call, split_reasoning, ThinkSplitter, invented_recall, mutation_target, plain_text, render_results, split_file_op, store_growth, store_memories, same_as_last_time, store_project_notes, strip_record_echo, strip_result_echoes, strip_tool_calls, unsearched_memory,
 )
 from .files import (
     _dest_path, fetch_url, find_files, list_directory, path_is_trusted, read_file, resolve_guarded, search_images, search_web,
@@ -157,9 +157,12 @@ class Worker(QThread):
 
         The model streams `reasoning_content` first and `content` after it - 59 chunks
         of the former before 10 of the latter, on a short answer - so reasoning is
-        counted for the status line and never shown as the reply."""
+        counted for the status line and never shown as the reply. Some servers leave the
+        trace inline between <think> tags instead; ThinkSplitter routes that the same way
+        and keeps what it saw in `last_reasoning`."""
         payload = {**payload, "stream": True}
-        text, reasoned = [], 0
+        text, thoughts, reasoned = [], [], 0
+        splitter = ThinkSplitter()
         with requests.post(url, json=payload, timeout=timeout, stream=True) as response:
             if response.status_code != 200:
                 raise RuntimeError(f"API error {response.status_code}: {response.text[:300]}")
@@ -178,14 +181,30 @@ class Worker(QThread):
                     delta = json.loads(body)["choices"][0].get("delta") or {}
                 except (ValueError, KeyError, IndexError):
                     continue
-                if delta.get("reasoning_content"):
+                # `reasoning_content` is llama.cpp's and DeepSeek's name for the trace;
+                # `reasoning` is what newer llama.cpp, vLLM and Ollama call it.
+                trace = delta.get("reasoning_content") or delta.get("reasoning")
+                if trace:
+                    thoughts.append(trace)
                     reasoned += 1
                     if reasoned % 8 == 0:
                         self.thinking.emit(reasoned)
                 piece = delta.get("content")
                 if piece:
-                    text.append(piece)
-                    self.chunk.emit(piece)
+                    shown, inline = splitter.feed(piece)
+                    if inline:
+                        thoughts.append(inline)
+                        reasoned += 1
+                        if reasoned % 8 == 0:
+                            self.thinking.emit(reasoned)
+                    if shown:
+                        text.append(shown)
+                        self.chunk.emit(shown)
+        tail = splitter.flush()
+        if tail:
+            text.append(tail)
+            self.chunk.emit(tail)
+        self.last_reasoning = "".join(thoughts)
         return "".join(text)
 
     def ask_model(self, system_prompt, user_prompt, image=None,
@@ -243,7 +262,9 @@ class Worker(QThread):
             raise RuntimeError(f"API error {response.status_code}: {response.text}")
         data = response.json()
         message = data["choices"][0]["message"]
-        raw = message.get("content") or ""
+        self.last_reasoning, raw = split_reasoning(message.get("content") or "")
+        self.last_reasoning = (message.get("reasoning_content") or message.get("reasoning")
+                               or self.last_reasoning)
         usage = data.get("usage") or {}
         if usage:
             # llama.cpp reports exact counts; no need to estimate.
