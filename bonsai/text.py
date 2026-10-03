@@ -618,7 +618,11 @@ def invented_files(reply, trace, least=2):
     return missing if len(missing) >= least else []
 
 
-THINK_BLOCK_RE = re.compile(r"<(think|thinking|reasoning)>(.*?)</\1>", re.I | re.S)
+# <think> is Qwen/DeepSeek's; <|channel>thought ... <channel|> is Gemma 4's, which is
+# also what an empty thinking turn looks like when thinking is switched off.
+THINK_OPEN = r"<(?:think|thinking|reasoning)>|<\|channel>(?:thought\n?)?"
+THINK_CLOSE = r"</(?:think|thinking|reasoning)>|<channel\|>"
+THINK_BLOCK_RE = re.compile(rf"(?:{THINK_OPEN})(.*?)(?:{THINK_CLOSE})", re.I | re.S)
 
 
 def split_reasoning(text):
@@ -631,13 +635,14 @@ def split_reasoning(text):
     unclosed one (the reply was cut off while still thinking, so there is no answer),
     and a lone closing tag (the template already opened the block in the prompt)."""
     text = text or ""
-    found = [m.group(2).strip() for m in THINK_BLOCK_RE.finditer(text)]
+    found = [m.group(1).strip() for m in THINK_BLOCK_RE.finditer(text)]
+    found = [f for f in found if f] or ([""] if THINK_BLOCK_RE.search(text) else [])
     text = THINK_BLOCK_RE.sub("", text)
-    opened = re.search(r"<(think|thinking|reasoning)>", text, re.I)
+    opened = re.search(THINK_OPEN, text, re.I)
     if opened:
         found.append(text[opened.end():].strip())
         text = text[:opened.start()]
-    closed = re.search(r"</(think|thinking|reasoning)>", text, re.I)
+    closed = re.search(THINK_CLOSE, text, re.I)
     if closed:
         found.append(text[:closed.start()].strip())
         text = text[closed.end():]
@@ -832,18 +837,19 @@ class ThinkSplitter:
     A tag can arrive split across chunks ("<thi" then "nk>"), so anything that might
     still turn into a tag is held back until the next piece settles it. feed() returns
     (answer, reasoning) for that piece."""
-    OPEN = re.compile(r"<(think|thinking|reasoning)>", re.I)
-    CLOSE = re.compile(r"</(think|thinking|reasoning)>", re.I)
+    OPEN = re.compile(THINK_OPEN, re.I)
+    CLOSE = re.compile(THINK_CLOSE, re.I)
 
     def __init__(self):
         self.buffer = ""
         self.inside = False
         self.started = False
+        self.label = False
 
     def _held(self):
         """Length of a trailing fragment that could still become a tag."""
         cut = self.buffer.rfind("<")
-        if cut != -1 and len(self.buffer) - cut < 12 and ">" not in self.buffer[cut:]:
+        if cut != -1 and len(self.buffer) - cut < 20 and ">" not in self.buffer[cut:]:
             return len(self.buffer) - cut
         return 0
 
@@ -856,9 +862,18 @@ class ThinkSplitter:
             if match:
                 (thought if self.inside else answer).append(self.buffer[:match.start()])
                 self.buffer = self.buffer[match.end():]
+                # Gemma's opener may arrive as "<|channel>" with its "thought\n" label
+                # still in flight; that label is not part of the reasoning.
+                self.label = (not self.inside and match.group(0).lower() == "<|channel>")
                 self.inside = not self.inside
                 self.started = True
                 continue
+            if self.label and self.inside:
+                if "thought\n".startswith(self.buffer):
+                    return "".join(answer), "".join(thought)    # label incomplete; wait
+                if self.buffer.startswith("thought\n"):
+                    self.buffer = self.buffer[len("thought\n"):]
+                self.label = False
             # A lone closing tag before any opener means the template opened the block
             # in the prompt, so everything so far was reasoning.
             if not self.inside and not self.started:

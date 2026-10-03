@@ -54,5 +54,26 @@ check("`reasoning` field", (text, w.last_reasoning), ("Hi", "think"))
 w, text, seen = stream([{"content": "<think>a"}, {"content": "b</think>Hi"}])
 check("inline tags", (text, w.last_reasoning, "".join(seen)), ("Hi", "ab", "Hi"))
 
+print("\n-- Gemma 4 channel markers, as they appear in a real debug log --")
+real = '<|channel>thought\n<channel|><|channel>thought\n<channel|><channel|><|tool_call>call:TOOL:LIST_DIR: /x<tool_call|>'
+check("empty thought blocks vanish", "channel" in denoise(real), False)
+check("the call underneath survives", extract_tool_call(real), ("LIST_DIR", "/x"))
+check("a thought with content is split off",
+      split_reasoning("<|channel>thought\nplan it<channel|>Hi"), ("plan it", "Hi"))
+loop = "<|channel>thought\n<channel|>" * 500
+check("a 500-deep loop of empty thoughts is an empty reply", denoise(loop).strip(), "")
+check("streamed in awkward pieces", run(["<|chan", "nel>thou", "ght\nabc<chan", "nel|>Hi"]), ("Hi", "abc"))
+
+print("\n-- a vanished file does not crash a listing --")
+import os, tempfile
+from bonsai.files import list_directory
+d = Path(tempfile.mkdtemp(prefix="bonsai-ls-"))
+(d / "sub").mkdir(); (d / "sub" / "real.txt").write_text("hi")
+os.symlink("/nonexistent/target", d / "sub" / "SingletonCookie")
+os.symlink("/nonexistent/target", d / "dangling")
+out = list_directory(str(d))
+check("listing completes", "real.txt (2 bytes)" in out, True)
+check("dangling links are named, not fatal", out.count("broken link"), 2)
+
 print(f"\n{ok} passed, {fail} failed")
 sys.exit(1 if fail else 0)
