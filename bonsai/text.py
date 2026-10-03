@@ -628,7 +628,7 @@ THINK_BLOCK_RE = re.compile(rf"(?:{THINK_OPEN})(.*?)(?:{THINK_CLOSE})", re.I | r
 def split_reasoning(text):
     """Return (reasoning, answer) for a reply that may carry its own thinking inline.
 
-    Unsloth, llama.cpp without --reasoning-format, and most Qwen/DeepSeek templates put
+    Servers such as llama.cpp without --reasoning-format, and most Qwen/DeepSeek templates, put
     the trace in the content between <think> tags rather than in a separate field. Left
     in, it is read as the answer - and a trace that says "I should call [TOOL: ...]"
     would be executed as though the model had. Three shapes occur: a closed block, an
